@@ -85,8 +85,23 @@ internal class ModuleDetailsToJavaModuleTransformer(
     }
   }
 
-  private fun toJavaSourceRoots(inputEntity: ModuleDetails): List<JavaSourceRoot> =
-    SourcesItemToJavaSourceRootTransformer().transform(inputEntity.target)
+  private fun toJavaSourceRoots(inputEntity: ModuleDetails): List<JavaSourceRoot> {
+    // Get the target's own source roots
+    val targetSourceRoots = SourcesItemToJavaSourceRootTransformer().transform(inputEntity.target)
+
+    // Add source dependencies (umbrella target sources) as individual source roots
+    // Keep it simple to ensure cross-shard resolution works
+    val sourceDependencyRoots = inputEntity.sourceDependencies.map { sourcePath ->
+      JavaSourceRoot(
+        sourcePath = sourcePath,
+        generated = false,
+        packagePrefix = "", // Let IntelliJ figure out the package structure
+        rootType = JAVA_SOURCE_ROOT_TYPE,
+      )
+    }
+
+    return targetSourceRoots + sourceDependencyRoots
+  }
 
   private fun toResourceRoots(inputEntity: ModuleDetails): List<ResourceRoot> =
     resourcesItemToJavaResourceRootTransformer.transform(inputEntity.target)

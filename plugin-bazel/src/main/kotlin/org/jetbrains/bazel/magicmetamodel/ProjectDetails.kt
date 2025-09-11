@@ -1,5 +1,6 @@
 package org.jetbrains.bazel.magicmetamodel
 
+import java.nio.file.Path
 import org.jetbrains.bazel.label.Label
 import org.jetbrains.bazel.workspacecontext.WorkspaceContext
 import org.jetbrains.bsp.protocol.JavacOptionsItem
@@ -15,4 +16,5 @@ data class ProjectDetails(
   var defaultJdkName: String? = null,
   var jvmBinaryJars: List<JvmBinaryJarsItem> = emptyList(),
   val workspaceContext: WorkspaceContext? = null,
+  val targetSourceDependencies: Map<Label, Set<Path>> = emptyMap(), // Add cross-shard source dependencies
 )

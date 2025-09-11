@@ -227,11 +227,16 @@ class BspProjectMapper(
           ?.sourceDependencies
           ?.toList()
           .orEmpty()
+      println("DEBUG BSP: Target $label has ${sources.size} source dependencies")
+      sources.forEach { println("DEBUG BSP: Source dependency: $it") }
       return DependencySourcesItem(label, sources)
     }
 
     val labels = dependencySourcesParams.targets
+    println("DEBUG BSP: dependencySources called for ${labels.size} targets")
     val items = labels.map(::getDependencySourcesItem)
+    val totalSources = items.sumOf { it.sources.size }
+    println("DEBUG BSP: Returning dependency sources result with $totalSources total sources across ${items.size} items")
     return DependencySourcesResult(items)
   }
 

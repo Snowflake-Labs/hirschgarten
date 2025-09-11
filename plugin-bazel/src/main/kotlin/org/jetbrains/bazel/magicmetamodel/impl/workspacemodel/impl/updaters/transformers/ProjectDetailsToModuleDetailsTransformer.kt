@@ -12,6 +12,10 @@ class ProjectDetailsToModuleDetailsTransformer(private val projectDetails: Proje
   fun moduleDetailsForTargetId(targetId: Label): ModuleDetails {
     val target = targetsIndex[targetId] ?: error("Cannot find target for target id: $targetId.")
     val allDependencies = libraryGraph.calculateAllDependencies(target)
+    val sourceDependencies = projectDetails.targetSourceDependencies[targetId] ?: emptySet()
+    // Use println for transformer since it doesn't have access to logger infrastructure
+    println("DEBUG TRANSFORMER: Target $targetId has ${sourceDependencies.size} source dependencies")
+    sourceDependencies.forEach { println("DEBUG TRANSFORMER: Source dependency: $it") }
     return ModuleDetails(
       target = target,
       javacOptions = javacOptionsIndex[targetId],
@@ -19,6 +23,7 @@ class ProjectDetailsToModuleDetailsTransformer(private val projectDetails: Proje
       moduleDependencies = allDependencies.moduleDependencies.toList(),
       defaultJdkName = projectDetails.defaultJdkName,
       jvmBinaryJars = jvmBinaryJarsIndex[targetId].orEmpty(),
+      sourceDependencies = sourceDependencies,
     )
   }
 }

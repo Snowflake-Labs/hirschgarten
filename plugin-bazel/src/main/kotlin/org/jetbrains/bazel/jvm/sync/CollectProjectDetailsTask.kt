@@ -52,6 +52,7 @@ import org.jetbrains.bazel.ui.console.withSubtask
 import org.jetbrains.bazel.ui.notifications.BazelBalloonNotifier
 import org.jetbrains.bazel.utils.SourceType
 import org.jetbrains.bsp.protocol.BuildTarget
+import org.jetbrains.bsp.protocol.DependencySourcesParams
 import org.jetbrains.bsp.protocol.JavacOptionsParams
 import org.jetbrains.bsp.protocol.JoinedBuildServer
 import org.jetbrains.bsp.protocol.JvmBinaryJarsParams
@@ -436,6 +437,25 @@ suspend fun calculateProjectDetailsWithCapabilities(
           server.workspaceContext()
         }
 
+      // Collect source dependencies for cross-shard resolution
+      val targetSourceDependencies =
+        query("buildTarget/dependencySources") {
+          val allTargetIds = bspBuildTargets.targets.map { it.id }
+          val dependencySourcesResult = server.buildTargetDependencySources(
+            DependencySourcesParams(allTargetIds)
+          )
+          thisLogger().info("DEBUG CLIENT: Received dependency sources for ${dependencySourcesResult.items.size} targets")
+          val result = dependencySourcesResult.items.associate { item ->
+            thisLogger().info("DEBUG CLIENT: Target ${item.target} has ${item.sources.size} source dependencies")
+            item.sources.forEach { source ->
+              thisLogger().info("DEBUG CLIENT: Source dependency: $source")
+            }
+            item.target to item.sources.toSet()
+          }
+          thisLogger().info("DEBUG CLIENT: Total source dependencies found: ${result.values.sumOf { it.size }}")
+          result
+        }
+
       ProjectDetails(
         targetIds = bspBuildTargets.targets.map { it.id },
         targets = bspBuildTargets.targets.toSet(),
@@ -443,6 +463,7 @@ suspend fun calculateProjectDetailsWithCapabilities(
         libraries = libraries.libraries,
         jvmBinaryJars = jvmBinaryJarsResult?.items ?: emptyList(),
         workspaceContext = workspaceContext,
+        targetSourceDependencies = targetSourceDependencies,
       )
     } catch (e: Exception) {
       // TODO the type xd
