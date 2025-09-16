@@ -411,7 +411,7 @@ suspend fun calculateProjectDetailsWithCapabilities(
         query("workspace/libraries") {
           server.workspaceLibraries()
         }
-
+      thisLogger().info("DEBUG CLIENT: Found {${bspBuildTargets.targets.size} targets")
       val jvmBinaryJarsResult =
         queryIf(
           javaTargetIds.isNotEmpty() &&
@@ -440,6 +440,7 @@ suspend fun calculateProjectDetailsWithCapabilities(
       // Collect source dependencies for cross-shard resolution
       val targetSourceDependencies =
         query("buildTarget/dependencySources") {
+          thisLogger().info("DEBUG CLIENT: Requesting dependency sources for ${bspBuildTargets.targets.size} targets")
           val allTargetIds = bspBuildTargets.targets.map { it.id }
           val dependencySourcesResult = server.buildTargetDependencySources(
             DependencySourcesParams(allTargetIds)
@@ -447,9 +448,6 @@ suspend fun calculateProjectDetailsWithCapabilities(
           thisLogger().info("DEBUG CLIENT: Received dependency sources for ${dependencySourcesResult.items.size} targets")
           val result = dependencySourcesResult.items.associate { item ->
             thisLogger().info("DEBUG CLIENT: Target ${item.target} has ${item.sources.size} source dependencies")
-            item.sources.forEach { source ->
-              thisLogger().info("DEBUG CLIENT: Source dependency: $source")
-            }
             item.target to item.sources.toSet()
           }
           thisLogger().info("DEBUG CLIENT: Total source dependencies found: ${result.values.sumOf { it.size }}")
