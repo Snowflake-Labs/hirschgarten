@@ -38,14 +38,11 @@ class DependencyGraph(private val rootTargets: Set<Label> = emptySet(), private 
   fun getSourcesFromReverseDependencies(targetId: Label): Set<TargetInfo> {
     return getReverseDependencies(targetId)
       .mapNotNull { reverseDep -> idToTargetInfo[reverseDep] }
-      .filter { it.hasJvmTargetInfo() && hasJavaOrKotlinSources(it) }
+      .filter { it.hasJvmTargetInfo() }
       .toSet()
   }
 
-  private fun hasJavaOrKotlinSources(targetInfo: TargetInfo): Boolean =
-    targetInfo.sourcesList.any {
-      it.relativePath.endsWith(".java") || it.relativePath.endsWith(".kt")
-    }
+  fun getTargetInfo(targetId: Label): TargetInfo? = idToTargetInfo[targetId]
 
   private fun createIdToLazyTransitiveDependenciesMap(idToTargetInfo: Map<Label, TargetInfo>): Map<Label, Lazy<Set<TargetInfo>>> =
     idToTargetInfo.mapValues { (_, targetInfo) ->

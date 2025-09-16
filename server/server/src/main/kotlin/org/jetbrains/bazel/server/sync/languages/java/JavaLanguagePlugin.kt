@@ -52,21 +52,37 @@ class JavaLanguagePlugin(
     // For sharded Java libraries, include sources from reverse dependencies (umbrella targets)
     // that contain all the source code from the shards
     println("DEBUG: dependencySources called for target: ${targetInfo.id}")
-    val umbrellaTargets = dependencyGraph.getSourcesFromReverseDependencies(targetInfo.label())
+    println("DEBUG: Target tags: ${targetInfo.tagsList}")
+    if (!targetInfo.tagsList.contains("shard")) {
+      return emptySet()
+    }
+    val umbrellaTargets = dependencyGraph
+      .getSourcesFromReverseDependencies(targetInfo.label())
+      .filter{ it.tagsList.contains("umbrella") }
     println("DEBUG: Found ${umbrellaTargets.size} umbrella targets for ${targetInfo.id}")
 
     val sources = umbrellaTargets
       .flatMap { umbrellaTarget ->
         println("DEBUG: Processing umbrella target: ${umbrellaTarget.id}")
+        println("DEBUG: Umbrella target dependencies: ${umbrellaTarget.dependenciesList.map { it.label() }}")
         // Include sources from umbrella targets that depend on this shard
-        umbrellaTarget.sourcesList.map { bazelPathsResolver.resolve(it) } +
-        umbrellaTarget.generatedSourcesList
-          .filter { !it.relativePath.endsWith(".srcjar") }
-          .map { bazelPathsResolver.resolve(it) }
+        umbrellaTarget.dependenciesList.mapNotNull { dependency ->
+          dependencyGraph.getTargetInfo(dependency.label())
+        }
+          .filter { dependencyTargetInfo ->
+            println("DEBUG: Checking dependency target: ${dependencyTargetInfo.id} with tags: ${dependencyTargetInfo.tagsList}")
+            dependencyTargetInfo.tagsList.contains("shard")
+          }
+          .flatMap { dependencyTargetInfo ->
+            println("DEBUG: Including sources from dependency target: ${dependencyTargetInfo.id}")
+            dependencyTargetInfo.sourcesList.map {
+              bazelPathsResolver.resolve(it)
+            }
+          }
       }
-      .filter { it.exists() && (it.toString().endsWith(".java") || it.toString().endsWith(".kt")) }
+      .filter {
+        it.exists() && (it.toString().endsWith(".java") || it.toString().endsWith(".kt")) }
       .toSet()
-
     println("DEBUG: Returning ${sources.size} sources for ${targetInfo.id}")
     sources.forEach { println("DEBUG: Source: $it") }
     return sources
