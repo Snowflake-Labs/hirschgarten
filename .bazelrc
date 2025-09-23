@@ -76,3 +76,8 @@ test:slow --jobs=1 //plugin-bazel/src/test/kotlin/org/jetbrains/bazel/... //serv
 
 common --action_env=ANDROID_HOME=
 common --action_env=ANDROID_SDK_HOME=
+
+build --action_env=PATH=/opt/rh/devtoolset-10/root/usr/bin:/opt/rh/rh-python36/root/usr/bin:/bin:/usr/bin:/usr/local/bin
+build --action_env=LD_LIBRARY_PATH=/opt/rh/devtoolset-10/root/usr/lib64:/opt/rh/devtoolset-10/root/usr/lib:/opt/rh/devtoolset-10/root/usr/lib64/dyninst:/opt/rh/devtoolset-10/root/usr/lib/dyninst:/opt/rh/devtoolset-10/root/usr/lib64:/opt/rh/devtoolset-10/root/usr/lib
+build --host_action_env=PATH=/opt/rh/devtoolset-10/root/usr/bin:/opt/rh/rh-python36/root/usr/bin:/bin:/usr/bin:/usr/local/bin
+build --host_action_env=LD_LIBRARY_PATH=/opt/rh/devtoolset-10/root/usr/lib64:/opt/rh/devtoolset-10/root/usr/lib:/opt/rh/devtoolset-10/root/usr/lib64/dyninst:/opt/rh/devtoolset-10/root/usr/lib/dyninst:/opt/rh/devtoolset-10/root/usr/lib64:/opt/rh/devtoolset-10/root/usr/lib
