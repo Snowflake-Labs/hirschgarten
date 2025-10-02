@@ -29,6 +29,8 @@ import org.jetbrains.bazel.target.TargetUtils
 import org.jetbrains.bazel.ui.settings.BazelApplicationSettingsService
 import org.jetbrains.bazel.ui.widgets.fileTargets.updateBazelFileTargetsWidget
 import org.jetbrains.bazel.utils.configureRunConfigurationIgnoreProducers
+import org.jetbrains.bazel.sync.scope.SecondPhaseSync
+import org.jetbrains.bazel.sync.status.isSyncInProgress
 import java.nio.file.Path
 import kotlin.io.path.isDirectory
 
@@ -61,7 +63,7 @@ class BazelStartupActivity : BazelProjectActivity() {
 
       executeOnEveryProjectStartup(project)
 
-      resyncProjectIfNeeded(project)
+      runStartupSyncWithFeedback(project)
 
       executeOnSyncedProject(project)
 
@@ -79,18 +81,21 @@ private suspend fun executeOnEveryProjectStartup(project: Project) {
   project.serviceAsync<BazelWorkspace>().initialize()
 }
 
-private suspend fun resyncProjectIfNeeded(project: Project) {
-  if (isProjectInIncompleteState(project)) {
-    if (serviceAsync<BazelApplicationSettingsService>().settings.enablePhasedSync) {
-      log.info("Running Bazel phased sync task")
-      PhasedSync(project).sync()
-    } else {
-      log.info("Running Bazel sync task")
-      ProjectSyncTask(project).sync(
-        syncScope = SecondPhaseSync,
-        buildProject = BazelFeatureFlags.isBuildProjectOnSyncEnabled,
-      )
-    }
+private suspend fun runStartupSyncWithFeedback(project: Project) {
+  if (project.isSyncInProgress()) {
+    log.info("Skipping startup sync task because another sync is already running")
+    return
+  }
+
+  if (serviceAsync<BazelApplicationSettingsService>().settings.enablePhasedSync) {
+    log.info("Running Bazel phased sync task on startup")
+    PhasedSync(project).sync()
+  } else {
+    log.info("Running Bazel sync task on startup")
+    ProjectSyncTask(project).sync(
+      syncScope = SecondPhaseSync,
+      buildProject = BazelFeatureFlags.isBuildProjectOnSyncEnabled,
+    )
   }
 }
 
