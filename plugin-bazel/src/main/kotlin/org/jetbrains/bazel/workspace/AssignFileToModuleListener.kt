@@ -346,18 +346,18 @@ private suspend fun queryTargetsForFile(project: Project, fileUrl: VirtualFileUr
     null
   }
 
-private suspend fun askForInverseSources(project: Project, fileUrl: VirtualFileUrl): InverseSourcesResult =
+public suspend fun askForInverseSources(project: Project, fileUrl: VirtualFileUrl): InverseSourcesResult =
   project.connection.runWithServer { bspServer ->
     bspServer
       .buildTargetInverseSources(InverseSourcesParams(TextDocumentIdentifier(fileUrl.toPath())))
   }
 
-private fun Label.toModuleEntity(storage: ImmutableEntityStorage, project: Project): ModuleEntity? {
+fun Label.toModuleEntity(storage: ImmutableEntityStorage, project: Project): ModuleEntity? {
   val moduleId = ModuleId(this.formatAsModuleName(project))
   return storage.resolve(moduleId)
 }
 
-private fun VirtualFileUrl.addToModule(
+fun VirtualFileUrl.addToModule(
   entityStorageDiff: MutableEntityStorage,
   module: ModuleEntity,
   extension: String?,

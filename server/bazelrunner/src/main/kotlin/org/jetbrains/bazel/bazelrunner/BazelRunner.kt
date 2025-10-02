@@ -123,7 +123,6 @@ class BazelRunner(
       listOf(
         "--curses=no",
         "--color=yes",
-        "--noprogress_in_terminal_title",
       ),
     )
 
