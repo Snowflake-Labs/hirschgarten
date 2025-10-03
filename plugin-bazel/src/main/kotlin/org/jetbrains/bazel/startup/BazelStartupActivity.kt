@@ -29,7 +29,6 @@ import org.jetbrains.bazel.target.TargetUtils
 import org.jetbrains.bazel.ui.settings.BazelApplicationSettingsService
 import org.jetbrains.bazel.ui.widgets.fileTargets.updateBazelFileTargetsWidget
 import org.jetbrains.bazel.utils.configureRunConfigurationIgnoreProducers
-import org.jetbrains.bazel.sync.scope.SecondPhaseSync
 import org.jetbrains.bazel.sync.status.isSyncInProgress
 import java.nio.file.Path
 import kotlin.io.path.isDirectory
