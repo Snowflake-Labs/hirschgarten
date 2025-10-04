@@ -116,7 +116,6 @@ internal class ImportRunConfigurationsSyncHook : ProjectSyncHook {
   private fun loadShellScriptRunConfiguration(project: Project, runConfigurationXml: Element): RunnerAndConfigurationSettings {
     // Create a copy of the XML element to modify it
     val modifiedXml = runConfigurationXml.clone()
-    println(modifiedXml)
     // Apply replaceProjectDir to the specified shell script configuration fields
     modifiedXml.children.filter { it.name == "option" }.forEach { option ->
       when (option.getAttributeValue("name")) {
