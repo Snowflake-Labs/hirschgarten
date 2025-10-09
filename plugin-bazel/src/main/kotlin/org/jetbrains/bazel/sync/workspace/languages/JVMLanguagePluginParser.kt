@@ -1,16 +1,25 @@
 package org.jetbrains.bazel.sync.workspace.languages
 
+import com.intellij.openapi.diagnostic.logger
 import java.nio.charset.Charset
 import java.nio.file.Path
 import kotlin.io.path.bufferedReader
 import kotlin.io.path.notExists
 
 object JVMLanguagePluginParser {
+  private val logger = logger<JVMLanguagePluginParser>()
   private val PACKAGE_PATTERN = Regex("^\\s*package\\s+([\\p{L}0-9_.]+)")
   private val ONE_BYTE_CHARSET = Charset.forName("ISO-8859-1")
   private const val BUFFER_SIZE = 256 // Should be enough to read a Java package name if it's on the first line
 
-  fun calculateJVMSourceRootAndAdditionalData(source: Path, multipleLines: Boolean = false): String? = findPackage(source, multipleLines)
+  fun calculateJVMSourceRootAndAdditionalData(source: Path, multipleLines: Boolean = false): String? {
+    val result = findPackage(source, multipleLines)
+
+    logger.info("JVM Package Resolution for: $source")
+    logger.info("  -> Declared package: $result")
+
+    return result
+  }
 
   private fun findPackage(source: Path, multipleLines: Boolean): String? {
     if (source.notExists()) {
