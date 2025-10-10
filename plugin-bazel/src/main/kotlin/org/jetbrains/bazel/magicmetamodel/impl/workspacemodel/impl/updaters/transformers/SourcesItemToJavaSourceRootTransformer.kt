@@ -27,16 +27,13 @@ internal class SourcesItemToJavaSourceRootTransformer : WorkspaceModelEntityPart
 
   private fun inferRootType(buildTarget: BuildTarget): SourceRootTypeId =
     if (buildTarget.kind.ruleType == RuleType.TEST) JAVA_TEST_SOURCE_ROOT_TYPE else JAVA_SOURCE_ROOT_TYPE
-
   private fun toJavaSourceRoot(sourceRoot: SourceRoot, rootType: SourceRootTypeId, targetId: String): JavaSourceRoot {
     val packagePrefix = sourceRoot.jvmPackagePrefix ?: ""
-
     logger.info("  Source: ${sourceRoot.sourcePath}")
     logger.info("    -> jvmPackagePrefix from BSP: ${sourceRoot.jvmPackagePrefix}")
     logger.info("    -> Final packagePrefix set: '$packagePrefix'")
     logger.info("    -> Root type: $rootType")
     logger.info("    -> Target: $targetId")
-
     return JavaSourceRoot(
       sourcePath = sourceRoot.sourcePath,
       generated = sourceRoot.generated,

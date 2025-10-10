@@ -46,12 +46,28 @@ internal class JavaModuleToDummyJavaModulesTransformerHACK(
   data class MergedRoots(val mergedSourceRoots: List<JavaSourceRoot>, val mergedResourceRoots: List<ResourceRoot>?) : Result
 
   fun transform(inputEntity: JavaModule): Result {
+    println("========================================")
+    println("HACK: transform() called for module: ${inputEntity.genericModuleInfo.name}")
+    println("  Module has ${inputEntity.sourceRoots.size} source roots")
+
     val buildFileDirectory = inputEntity.baseDirContentRoot?.path
+    println("  buildFileDirectory: $buildFileDirectory")
+
     val (relevantSourceRoots, irrelevantSourceRoots) = inputEntity.sourceRoots.partition { it.isRelevant() }
+    println("  Relevant source roots: ${relevantSourceRoots.size}")
+    println("  Irrelevant source roots: ${irrelevantSourceRoots.size}")
+
+    relevantSourceRoots.forEachIndexed { index, root ->
+      println("    [$index] sourcePath=${root.sourcePath}, packagePrefix='${root.packagePrefix}', rootType=${root.rootType}")
+    }
+
     val sourceRootsForParentDirs = calculateSourceRootsForParentDirs(relevantSourceRoots)
     val mergedSourceRootVotes = sourceRootsForParentDirs.restoreSourceRootFromPackagePrefix(limit = buildFileDirectory)
 
+    println("  BazelFeatureFlags.mergeSourceRoots = ${BazelFeatureFlags.mergeSourceRoots}")
+
     if (BazelFeatureFlags.mergeSourceRoots) {
+      println("  --> Taking MERGE ROOTS branch")
       val mergedSourceRoots =
         tryMergeSources(
           relevantSourceRoots,
@@ -59,20 +75,41 @@ internal class JavaModuleToDummyJavaModulesTransformerHACK(
           sourceRootsForParentDirs,
         )
       if (mergedSourceRoots != null) {
+        println("  --> Merge successful! Returning ${mergedSourceRoots.size} merged roots")
+        mergedSourceRoots.forEachIndexed { index, root ->
+          println("      [$index] sourcePath=${root.sourcePath}, packagePrefix='${root.packagePrefix}'")
+        }
         val mergedResourceRoots = tryMergeResources(inputEntity.resourceRoots)
+        println("========================================")
         return MergedRoots(
           mergedSourceRoots = mergedSourceRoots + irrelevantSourceRoots,
           mergedResourceRoots = mergedResourceRoots,
         )
+      } else {
+        println("  --> Merge failed, falling through to DUMMY MODULES branch")
       }
+    } else {
+      println("  --> SKIPPING merge (feature flag disabled), going to DUMMY MODULES branch")
     }
+
+    println("  --> Taking DUMMY MODULES branch")
+    println("  buildFileDirectory = $buildFileDirectory")
+
     val dummySourceRoots =
       if (buildFileDirectory == null) {
+        println("  --> Using mergedSourceRootVotes directly (buildFileDirectory is null)")
         mergedSourceRootVotes
       } else {
+        println("  --> Calling restoreSourceRootFromPackagePrefix again with limit=null")
         mergedSourceRootVotes.restoreSourceRootFromPackagePrefix(limit = null)
       }.keys.toList()
-    return DummyModulesToAdd(
+
+    println("  Final dummy source roots to create (${dummySourceRoots.size}):")
+    dummySourceRoots.forEachIndexed { index, root ->
+      println("    [$index] sourcePath=${root.sourcePath}, packagePrefix='${root.packagePrefix}'")
+    }
+
+    val result = DummyModulesToAdd(
       dummySourceRoots
         .zip(calculateDummyJavaModuleNames(dummySourceRoots, projectBasePath))
         .mapNotNull {
@@ -83,6 +120,17 @@ internal class JavaModuleToDummyJavaModulesTransformerHACK(
           )
         }.distinctBy { it.genericModuleInfo.name },
     )
+
+    println("  Created ${result.dummyModules.size} dummy modules")
+    result.dummyModules.forEach { module ->
+      println("    - ${module.genericModuleInfo.name}")
+      module.sourceRoots.forEach { root ->
+        println("        sourcePath=${root.sourcePath}, packagePrefix='${root.packagePrefix}'")
+      }
+    }
+    println("========================================")
+
+    return result
   }
 
   private fun JavaSourceRoot.isRelevant(): Boolean = this.sourcePath.extension in RELEVANT_EXTENSIONS || this.sourcePath.isDirectory()
