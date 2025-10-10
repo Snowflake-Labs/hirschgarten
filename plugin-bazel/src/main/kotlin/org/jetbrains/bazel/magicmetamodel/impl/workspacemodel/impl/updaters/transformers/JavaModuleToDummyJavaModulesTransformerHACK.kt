@@ -95,14 +95,18 @@ internal class JavaModuleToDummyJavaModulesTransformerHACK(
     println("  --> Taking DUMMY MODULES branch")
     println("  buildFileDirectory = $buildFileDirectory")
 
+    // CRITICAL FIX: Don't use the restored source roots that have stripped packagePrefix
+    // Instead, use the original source roots with their actual package prefixes preserved
     val dummySourceRoots =
       if (buildFileDirectory == null) {
-        println("  --> Using mergedSourceRootVotes directly (buildFileDirectory is null)")
-        mergedSourceRootVotes
+        println("  --> Using sourceRootsForParentDirs directly (buildFileDirectory is null)")
+        // Use parent dirs but preserve original package prefix
+        sourceRootsForParentDirs.keys.toList()
       } else {
-        println("  --> Calling restoreSourceRootFromPackagePrefix again with limit=null")
-        mergedSourceRootVotes.restoreSourceRootFromPackagePrefix(limit = null)
-      }.keys.toList()
+        println("  --> Using sourceRootsForParentDirs directly (preserving packagePrefix)")
+        // Use parent dirs but preserve original package prefix
+        sourceRootsForParentDirs.keys.toList()
+      }
 
     println("  Final dummy source roots to create (${dummySourceRoots.size}):")
     dummySourceRoots.forEachIndexed { index, root ->
