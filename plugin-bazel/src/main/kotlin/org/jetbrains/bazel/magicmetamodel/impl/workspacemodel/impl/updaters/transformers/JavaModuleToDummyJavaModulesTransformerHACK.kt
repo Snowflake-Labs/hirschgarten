@@ -66,12 +66,9 @@ internal class JavaModuleToDummyJavaModulesTransformerHACK(
         )
       }
     }
-    val dummySourceRoots =
-      if (buildFileDirectory == null) {
-        mergedSourceRootVotes
-      } else {
-        mergedSourceRootVotes.restoreSourceRootFromPackagePrefix(limit = null)
-      }.keys.toList()
+    // CRITICAL FIX: Don't use the restored source roots that have stripped packagePrefix
+    // Instead, use the original source roots with their actual package prefixes preserved
+    val dummySourceRoots = sourceRootsForParentDirs.keys.toList()
     return DummyModulesToAdd(
       dummySourceRoots
         .zip(calculateDummyJavaModuleNames(dummySourceRoots, projectBasePath))
