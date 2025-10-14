@@ -94,7 +94,8 @@ class AspectBazelProjectMapper(
               targetSupportsStrictDeps = { id -> targets[id]?.let { targetSupportsStrictDeps(it) } == true },
               isWorkspaceTarget = { id ->
                 targets[id]?.let { target ->
-                  target.sourcesCount > 0 && isWorkspaceTarget(target, repoMapping, featureFlags)
+                  // Test targets should be imported even if they have no sources (e.g., test suites with only runtime_deps)
+                  (target.sourcesCount > 0 || target.kind.endsWith("_test")) && isWorkspaceTarget(target, repoMapping, featureFlags)
                 } == true
               },
             )
