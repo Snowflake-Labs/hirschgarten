@@ -43,8 +43,22 @@ class JvmTestHandler(configuration: BazelRunConfiguration) : BazelRunHandler {
       environment.putCopyableUserData(SCRIPT_PATH_KEY, Ref())
       environment.putCopyableUserData(COROUTINE_JVM_FLAGS_KEY, Ref())
       return ScriptPathTestCommandLineState(environment, state)
+    } else {
+      val configuration = environment.runProfile as BazelRunConfiguration
+      if (configuration.targets.size == 1) {
+        val paramsToAdd: MutableList<String> = mutableListOf()
+        if (state.additionalBazelParams?.contains("--test_output") != true) {
+          paramsToAdd.add("--test_output=streamed")
+        }
+        if (state.additionalBazelParams?.contains("--strategy") != true) {
+          paramsToAdd.add("--strategy=TestRunner=standalone")
+        }
+        if (state.additionalBazelParams?.contains("--cache_test_results") != true) {
+          paramsToAdd.add("--cache_test_results=no")
+        }
+        state.additionalBazelParams = (state.additionalBazelParams ?: "") + paramsToAdd.joinToString(" ")
+        BazelTestCommandLineState(environment, state)
     }
-    return BazelTestCommandLineState(environment, state)
   }
 
   class JvmTestHandlerProvider : GooglePluginAwareRunHandlerProvider {
