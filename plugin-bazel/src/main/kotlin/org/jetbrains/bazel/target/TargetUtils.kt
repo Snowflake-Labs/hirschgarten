@@ -86,15 +86,7 @@ class TargetUtils(private val project: Project, private val coroutineScope: Coro
   }
 
   override suspend fun save() {
-    val exitInProgress = ApplicationManager.getApplication().isExitInProgress
-    if (!exitInProgress && (nowAsDuration() - lastSaved) < 5.minutes) {
-      return
-    }
-
-    withContext(Dispatchers.IO) {
-      db.save()
-      lastSaved = nowAsDuration()
-    }
+    return
   }
 
   fun addFileToTargetIdEntry(file: Path, targets: List<Label>) {
