@@ -82,15 +82,9 @@ class TargetUtils(private val project: Project, private val coroutineScope: Coro
   }
 
   override suspend fun save() {
-    val exitInProgress = ApplicationManager.getApplication().isExitInProgress
-    if (!exitInProgress && (nowAsDuration() - lastSaved) < 5.minutes) {
-      return
-    }
-
-    withContext(Dispatchers.IO) {
-      db.save()
-      lastSaved = nowAsDuration()
-    }
+    // TODO: we may turn this back on when the performance issue is resolved
+    //  https://youtrack.jetbrains.com/issue/BAZEL-2058/Optimize-storage-of-imported-target-info
+    return
   }
 
   fun addFileToTargetIdEntry(file: Path, targets: List<Label>) {
