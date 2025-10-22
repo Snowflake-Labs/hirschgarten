@@ -86,6 +86,8 @@ class TargetUtils(private val project: Project, private val coroutineScope: Coro
   }
 
   override suspend fun save() {
+    // TODO: we may turn this back on when the performance issue is resolved
+    //  https://youtrack.jetbrains.com/issue/BAZEL-2058/Optimize-storage-of-imported-target-info
     return
   }
 
