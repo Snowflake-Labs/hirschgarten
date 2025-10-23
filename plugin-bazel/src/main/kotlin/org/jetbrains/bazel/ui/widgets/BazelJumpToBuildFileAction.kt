@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import kotlinx.coroutines.Dispatchers
@@ -36,9 +37,24 @@ class BazelJumpToBuildFileAction(private val target: Label?) :
       // Action was created via BazelFileTargetsWidget. In this case `e.getPsiFile()` is `null`, but we should enable the action regardless.
       return true
     }
-    // Optimized: Just check if it's a Bazel project instead of expensive getTargetsForFile call
-    // The action will handle the case when no targets exist during actionPerformed
-    return e.getPsiFile()?.virtualFile != null && project.isBazelProject
+    // Only show for Java, Python, Golang, Starlark files in Bazel projects
+    val virtualFile = e.getPsiFile()?.virtualFile ?: return false
+    return project.isBazelProject && virtualFile.isSupportedFileType()
+  }
+
+  private fun VirtualFile.isSupportedFileType(): Boolean {
+    val extension = this.extension?.lowercase() ?: return false
+    return when (extension) {
+      "java", "kt", "kts" -> true  // Java/Kotlin
+      "py", "pyi" -> true           // Python
+      "go" -> true                  // Golang
+      "bzl" -> true                 // Starlark
+      else -> {
+        // Also support BUILD files (no extension or .bazel)
+        val name = this.name
+        name == "BUILD" || name == "BUILD.bazel" || name.startsWith("BUILD.")
+      }
+    }
   }
 
   override suspend fun actionPerformed(project: Project, e: AnActionEvent) {

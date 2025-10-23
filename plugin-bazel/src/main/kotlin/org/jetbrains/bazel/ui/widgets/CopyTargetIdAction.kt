@@ -7,6 +7,7 @@ import com.intellij.openapi.application.readAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
@@ -86,9 +87,19 @@ internal class CopyTargetIdAction : SuspendableAction({ BazelPluginBundle.messag
     return if (file is StarlarkFile) {
       shouldAddActionToStarlarkFile(file, e)
     } else {
-      // Optimized: Just check if it's a Bazel project instead of expensive getTargetsForFile call
-      // The action will handle the case when no targets exist during actionPerformed
-      project.isBazelProject
+      // Only show for Java, Python, Golang files in Bazel projects
+      val virtualFile = file.virtualFile ?: return false
+      project.isBazelProject && virtualFile.isSupportedFileType()
+    }
+  }
+
+  private fun VirtualFile.isSupportedFileType(): Boolean {
+    val extension = this.extension?.lowercase() ?: return false
+    return when (extension) {
+      "java", "kt", "kts" -> true  // Java/Kotlin
+      "py", "pyi" -> true           // Python
+      "go" -> true                  // Golang
+      else -> false
     }
   }
 
