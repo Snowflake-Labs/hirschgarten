@@ -44,7 +44,7 @@ class BazelJumpToBuildFileAction(private val target: Label?) :
 
     // Support BUILD files
     val name = virtualFile.name
-    if (name == "BUILD" || name == "BUILD.bazel" || name.startsWith("BUILD.")) {
+    if (name == "BUILD" || name.startsWith("BUILD.")) {
       return true
     }
 
