@@ -14,8 +14,10 @@ import org.jetbrains.bazel.action.SuspendableAction
 import org.jetbrains.bazel.action.getEditor
 import org.jetbrains.bazel.action.getPsiFile
 import org.jetbrains.bazel.config.BazelPluginBundle
+import org.jetbrains.bazel.config.isBazelProject
 import org.jetbrains.bazel.label.Label
 import org.jetbrains.bazel.languages.starlark.psi.StarlarkFile
+import org.jetbrains.bazel.utils.isBazelTargetSourceFile
 import org.jetbrains.bazel.languages.starlark.psi.statements.StarlarkExpressionStatement
 import org.jetbrains.bazel.languages.starlark.references.resolveLabel
 import org.jetbrains.bazel.target.targetUtils
@@ -35,9 +37,19 @@ class BazelJumpToBuildFileAction(private val target: Label?) :
       // Action was created via BazelFileTargetsWidget. In this case `e.getPsiFile()` is `null`, but we should enable the action regardless.
       return true
     }
-    return e.getPsiFile()?.virtualFile?.let {
-      project.targetUtils.getTargetsForFile(it).isNotEmpty()
-    } == true
+    // Only show for Java, Python, Golang files in Bazel projects
+    // Note: .bzl files are excluded as jumping to BUILD from .bzl doesn't make sense
+    val virtualFile = e.getPsiFile()?.virtualFile ?: return false
+    if (!project.isBazelProject) return false
+
+    // Support BUILD files
+    val name = virtualFile.name
+    if (name == "BUILD" || name.startsWith("BUILD.")) {
+      return true
+    }
+
+    // Support common source files (Java, Kotlin, Python, Go)
+    return virtualFile.isBazelTargetSourceFile()
   }
 
   override suspend fun actionPerformed(project: Project, e: AnActionEvent) {
