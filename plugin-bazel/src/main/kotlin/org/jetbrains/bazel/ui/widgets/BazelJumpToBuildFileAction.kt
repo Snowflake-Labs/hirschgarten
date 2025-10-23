@@ -6,7 +6,6 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +17,7 @@ import org.jetbrains.bazel.config.BazelPluginBundle
 import org.jetbrains.bazel.config.isBazelProject
 import org.jetbrains.bazel.label.Label
 import org.jetbrains.bazel.languages.starlark.psi.StarlarkFile
+import org.jetbrains.bazel.utils.isBazelTargetSourceFile
 import org.jetbrains.bazel.languages.starlark.psi.statements.StarlarkExpressionStatement
 import org.jetbrains.bazel.languages.starlark.references.resolveLabel
 import org.jetbrains.bazel.target.targetUtils
@@ -37,24 +37,19 @@ class BazelJumpToBuildFileAction(private val target: Label?) :
       // Action was created via BazelFileTargetsWidget. In this case `e.getPsiFile()` is `null`, but we should enable the action regardless.
       return true
     }
-    // Only show for Java, Python, Golang, Starlark files in Bazel projects
+    // Only show for Java, Python, Golang files in Bazel projects
+    // Note: .bzl files are excluded as jumping to BUILD from .bzl doesn't make sense
     val virtualFile = e.getPsiFile()?.virtualFile ?: return false
-    return project.isBazelProject && virtualFile.isSupportedFileType()
-  }
+    if (!project.isBazelProject) return false
 
-  private fun VirtualFile.isSupportedFileType(): Boolean {
-    val extension = this.extension?.lowercase() ?: return false
-    return when (extension) {
-      "java", "kt", "kts" -> true  // Java/Kotlin
-      "py", "pyi" -> true           // Python
-      "go" -> true                  // Golang
-      "bzl" -> true                 // Starlark
-      else -> {
-        // Also support BUILD files (no extension or .bazel)
-        val name = this.name
-        name == "BUILD" || name == "BUILD.bazel" || name.startsWith("BUILD.")
-      }
+    // Support BUILD files
+    val name = virtualFile.name
+    if (name == "BUILD" || name == "BUILD.bazel" || name.startsWith("BUILD.")) {
+      return true
     }
+
+    // Support common source files (Java, Kotlin, Python, Go)
+    return virtualFile.isBazelTargetSourceFile()
   }
 
   override suspend fun actionPerformed(project: Project, e: AnActionEvent) {

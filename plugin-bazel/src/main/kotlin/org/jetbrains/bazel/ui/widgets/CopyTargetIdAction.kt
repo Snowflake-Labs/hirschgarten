@@ -7,7 +7,6 @@ import com.intellij.openapi.application.readAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
@@ -20,6 +19,7 @@ import org.jetbrains.bazel.action.getPsiFile
 import org.jetbrains.bazel.config.BazelPluginBundle
 import org.jetbrains.bazel.config.isBazelProject
 import org.jetbrains.bazel.languages.starlark.elements.StarlarkTokenTypes
+import org.jetbrains.bazel.utils.isBazelTargetSourceFile
 import org.jetbrains.bazel.languages.starlark.psi.StarlarkFile
 import org.jetbrains.bazel.languages.starlark.psi.expressions.StarlarkCallExpression
 import org.jetbrains.bazel.languages.starlark.psi.expressions.arguments.StarlarkNamedArgumentExpression
@@ -89,17 +89,7 @@ internal class CopyTargetIdAction : SuspendableAction({ BazelPluginBundle.messag
     } else {
       // Only show for Java, Python, Golang files in Bazel projects
       val virtualFile = file.virtualFile ?: return false
-      project.isBazelProject && virtualFile.isSupportedFileType()
-    }
-  }
-
-  private fun VirtualFile.isSupportedFileType(): Boolean {
-    val extension = this.extension?.lowercase() ?: return false
-    return when (extension) {
-      "java", "kt", "kts" -> true  // Java/Kotlin
-      "py", "pyi" -> true           // Python
-      "go" -> true                  // Golang
-      else -> false
+      project.isBazelProject && virtualFile.isBazelTargetSourceFile()
     }
   }
 
