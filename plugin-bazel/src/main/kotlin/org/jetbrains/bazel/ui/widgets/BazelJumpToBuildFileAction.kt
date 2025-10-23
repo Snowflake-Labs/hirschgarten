@@ -14,6 +14,7 @@ import org.jetbrains.bazel.action.SuspendableAction
 import org.jetbrains.bazel.action.getEditor
 import org.jetbrains.bazel.action.getPsiFile
 import org.jetbrains.bazel.config.BazelPluginBundle
+import org.jetbrains.bazel.config.isBazelProject
 import org.jetbrains.bazel.label.Label
 import org.jetbrains.bazel.languages.starlark.psi.StarlarkFile
 import org.jetbrains.bazel.languages.starlark.psi.statements.StarlarkExpressionStatement
@@ -35,9 +36,9 @@ class BazelJumpToBuildFileAction(private val target: Label?) :
       // Action was created via BazelFileTargetsWidget. In this case `e.getPsiFile()` is `null`, but we should enable the action regardless.
       return true
     }
-    return e.getPsiFile()?.virtualFile?.let {
-      project.targetUtils.getTargetsForFile(it).isNotEmpty()
-    } == true
+    // Optimized: Just check if it's a Bazel project instead of expensive getTargetsForFile call
+    // The action will handle the case when no targets exist during actionPerformed
+    return e.getPsiFile()?.virtualFile != null && project.isBazelProject
   }
 
   override suspend fun actionPerformed(project: Project, e: AnActionEvent) {

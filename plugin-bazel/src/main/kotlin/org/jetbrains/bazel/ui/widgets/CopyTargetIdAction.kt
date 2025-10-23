@@ -17,6 +17,7 @@ import org.jetbrains.bazel.action.SuspendableAction
 import org.jetbrains.bazel.action.getEditor
 import org.jetbrains.bazel.action.getPsiFile
 import org.jetbrains.bazel.config.BazelPluginBundle
+import org.jetbrains.bazel.config.isBazelProject
 import org.jetbrains.bazel.languages.starlark.elements.StarlarkTokenTypes
 import org.jetbrains.bazel.languages.starlark.psi.StarlarkFile
 import org.jetbrains.bazel.languages.starlark.psi.expressions.StarlarkCallExpression
@@ -85,9 +86,9 @@ internal class CopyTargetIdAction : SuspendableAction({ BazelPluginBundle.messag
     return if (file is StarlarkFile) {
       shouldAddActionToStarlarkFile(file, e)
     } else {
-      file.virtualFile?.let { virtualFile ->
-        project.targetUtils.getTargetsForFile(virtualFile).isNotEmpty()
-      } ?: false
+      // Optimized: Just check if it's a Bazel project instead of expensive getTargetsForFile call
+      // The action will handle the case when no targets exist during actionPerformed
+      project.isBazelProject
     }
   }
 
