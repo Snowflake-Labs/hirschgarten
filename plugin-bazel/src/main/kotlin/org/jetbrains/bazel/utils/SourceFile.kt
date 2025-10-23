@@ -53,3 +53,21 @@ fun VirtualFile.isSourceFile(): Boolean {
 fun Path.isSourceFile(): Boolean = SourceType.hasSourceFileExtension(toString())
 
 fun URI.isSourceFile(): Boolean = SourceType.hasSourceFileExtension(toPath().toString())
+
+/**
+ * Checks if a VirtualFile is a supported source file type for Bazel target actions
+ * (Copy Target ID, Jump to BUILD file, etc.).
+ *
+ * Supported types: Java, Kotlin, Python, Golang
+ * Note: BUILD files and .bzl files are handled separately in the actions.
+ */
+fun VirtualFile.isBazelTargetSourceFile(): Boolean {
+  val extension = this.extension?.lowercase() ?: return false
+  return when (extension) {
+    "java", "kt", "kts" -> true  // Java/Kotlin
+    "py", "pyi" -> true           // Python
+    "go" -> true                  // Golang
+    else -> false
+  }
+}
+
