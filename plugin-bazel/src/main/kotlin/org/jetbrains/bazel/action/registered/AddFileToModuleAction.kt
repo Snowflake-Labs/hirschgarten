@@ -61,13 +61,13 @@ class AddFileToModuleAction :
           println("Found targets ${targets.joinToString(", ") { it.targetName }} for ${virtualFile.name}")
 
           // Convert targets to module entities and add the file
-          val modules = targets.map { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
+          val modulesWithTestFlag = targets.map { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
 
-          for (module in modules) {
+          for ((module, isTestModule) in modulesWithTestFlag) {
             val alreadyAdded = existingModules.contains(module)
             if (!alreadyAdded) {
-              println("Adding ${virtualFile.name} to module ${module.name}")
-              url.addToModule(entityStorageDiff, module, virtualFile.extension)
+              println("Adding ${virtualFile.name} to module ${module.name} (test module: $isTestModule)")
+              url.addToModule(entityStorageDiff, module, virtualFile.extension, isTestModule)
             } else {
               println("${virtualFile.name} is already added to module ${module.name}")
             }

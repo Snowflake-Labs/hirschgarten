@@ -13,6 +13,10 @@ private val bazelTagToTagMapping =
 
 class TargetTagsResolver {
   fun resolveTags(targetInfo: BspTargetInfo.TargetInfo, workspaceContext: WorkspaceContext): Set<Tag> {
+    return resolveTags(targetInfo)
+  }
+
+  fun resolveTags(targetInfo: BspTargetInfo.TargetInfo): Set<Tag> {
     val typeTags =
       when {
         targetInfo.isTest() -> setOf(Tag.TEST)
