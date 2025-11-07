@@ -63,7 +63,6 @@ import org.jetbrains.bazel.magicmetamodel.formatAsModuleName
 import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelDummyEntitySource
 import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelModuleEntitySource
 import org.jetbrains.bazel.server.connection.connection
-import org.jetbrains.bazel.server.label.label
 import org.jetbrains.bazel.sync.status.SyncStatusService
 import org.jetbrains.bazel.sync.workspace.mapper.normal.TargetTagsResolver
 import org.jetbrains.bazel.target.TargetUtils
