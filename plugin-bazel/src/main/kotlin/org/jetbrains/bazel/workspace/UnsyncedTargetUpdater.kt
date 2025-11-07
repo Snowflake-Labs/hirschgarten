@@ -173,7 +173,7 @@ class UnsyncedTargetUpdater {
 
     // TODO: these infer functions are copy pasted from other class that are under work from Jetbrains
     //  use the properly refactored public util functions instead when available
-
+    // source: AspectClientProjectMapper.kt#L144
     private fun inferKind(
       tags: Set<Tag>,
       kindString: String,
@@ -193,6 +193,7 @@ class UnsyncedTargetUpdater {
       )
     }
 
+    // source: AspectBazelProjectMapper.kt#L832
     private val languagesFromKinds: Map<String, Set<LanguageClass>> =
       mapOf(
         "java_library" to setOf(LanguageClass.JAVA),
@@ -219,6 +220,7 @@ class UnsyncedTargetUpdater {
         "py_library" to setOf(LanguageClass.PYTHON),
       )
 
+    // source: AspectBazelProjectMapper #L858
     private fun inferLanguages(target: TargetInfo): Set<LanguageClass> =
       buildSet {
         if (target.hasJvmTargetInfo()) {
