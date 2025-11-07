@@ -367,24 +367,20 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storageUpdate
   // note in short, the snapshot + the mutable storage = the current state
   // the storage updates here contains already commited changes that are not pushed into the final module storage
   val existingInStorage = storageUpdates.resolve(moduleId) ?: snapshot.resolve(moduleId)
+  var cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
   if (existingInStorage != null) {
     // For existing modules, check if it's a test module from the cached target
-    val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
     val isTestModule = (cachedTarget?.kind?.ruleType == RuleType.TEST)
     return existingInStorage to isTestModule
   }
 
   // Try to get build target information from TargetUtils first (for synced targets)
-  var cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
   val dependencies = mutableListOf<ModuleDependencyItem>()
 
   // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
   // If target is not in cache, trigger a partial sync to fetch it via UnsyncedTargetUpdater
   if (cachedTarget == null) {
-    val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storageUpdates)
-    if (result == null) {
-      return null
-    }
+    val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storageUpdates) ?: return null
     cachedTarget = result.first
     dependencies.addAll(result.second)
   }
