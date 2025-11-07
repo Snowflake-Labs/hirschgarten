@@ -2,7 +2,6 @@
 
 package org.jetbrains.bazel.workspace
 
-import com.google.devtools.build.lib.query2.proto.proto2api.Build
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.Service
@@ -49,17 +48,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.annotations.VisibleForTesting
-import org.jetbrains.bazel.commons.Language
 import org.jetbrains.bazel.commons.LanguageClass
 import org.jetbrains.bazel.commons.RuleType
 import org.jetbrains.bazel.commons.Tag
 import org.jetbrains.bazel.commons.TargetKind
-import org.jetbrains.bazel.commons.phased.kind
-import org.jetbrains.bazel.commons.phased.srcs
 import org.jetbrains.bazel.config.BazelPluginBundle
 import org.jetbrains.bazel.config.defaultJdkName
 import org.jetbrains.bazel.config.isBazelProject
-import org.jetbrains.bazel.config.rootDir
 import org.jetbrains.bazel.config.rootDir
 import org.jetbrains.bazel.coroutines.BazelCoroutineService
 import org.jetbrains.bazel.info.BspTargetInfo.TargetInfo
@@ -68,11 +63,8 @@ import org.jetbrains.bazel.magicmetamodel.formatAsModuleName
 import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelDummyEntitySource
 import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelModuleEntitySource
 import org.jetbrains.bazel.server.connection.connection
-import org.jetbrains.bazel.sync.fromRuleName
+import org.jetbrains.bazel.server.label.label
 import org.jetbrains.bazel.sync.status.SyncStatusService
-import org.jetbrains.bazel.sync.workspace.BazelWorkspaceResolveService
-import org.jetbrains.bazel.sync.workspace.languages.LanguagePlugin
-import org.jetbrains.bazel.sync.workspace.languages.java.JavaLanguagePlugin
 import org.jetbrains.bazel.sync.workspace.mapper.normal.TargetTagsResolver
 import org.jetbrains.bazel.target.TargetUtils
 import org.jetbrains.bazel.target.addLibraryModulePrefix
@@ -80,7 +72,7 @@ import org.jetbrains.bazel.target.moduleEntity
 import org.jetbrains.bazel.target.targetUtils
 import org.jetbrains.bazel.utils.SourceType
 import org.jetbrains.bazel.utils.isSourceFile
-import org.jetbrains.bazel.workspacecontext.WorkspaceContext
+import org.jetbrains.bsp.protocol.BuildTargetTag.NO_IDE
 import org.jetbrains.bsp.protocol.InverseSourcesParams
 import org.jetbrains.bsp.protocol.InverseSourcesResult
 import org.jetbrains.bsp.protocol.RawBuildTarget
@@ -88,7 +80,6 @@ import org.jetbrains.bsp.protocol.SourceItem
 import org.jetbrains.bsp.protocol.TextDocumentIdentifier
 import org.jetbrains.bsp.protocol.WorkspaceBuildTargetParams
 import org.jetbrains.bsp.protocol.WorkspaceBuildTargetSelector
-import org.jetbrains.bsp.protocol.utils.extractJvmBuildTarget
 import java.nio.file.Path
 
 // Interners for deduplicating ModuleId and ModuleDependency objects, matching pattern in ModuleEntityUpdater
@@ -319,7 +310,6 @@ private suspend fun processFileCreated(
     getModulesForFile(newFile, project)
       .filter { it.moduleEntity?.entitySource != BazelDummyEntitySource }
       .mapNotNull { it.moduleEntity }
-
   val url = newFile.toVirtualFileUrl(workspaceModel.getVirtualFileUrlManager())
   val path = url.toPath()
   val targets =
@@ -330,7 +320,7 @@ private suspend fun processFileCreated(
 
   val modulesWithTestFlag =
     targets
-      .map { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
+      .mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
 
   for ((module, isTestModule) in modulesWithTestFlag) {
     // if we want a file to be both added and removed in the same module, neither of them will be done
@@ -380,8 +370,6 @@ private suspend fun queryTargetsForFile(project: Project, fileUrl: VirtualFileUr
         .targets
         .toList()
     } catch (ex: Exception) {
-      println("queryTargetsForFile: Exception occurred: ${ex.message}")
-      ex.printStackTrace()
       null
     }
   } else {
@@ -394,14 +382,12 @@ suspend fun askForInverseSources(project: Project, fileUrl: VirtualFileUrl): Inv
       .buildTargetInverseSources(InverseSourcesParams(TextDocumentIdentifier(fileUrl.toPath())))
   }
 
-suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: MutableEntityStorage, project: Project): Pair<ModuleEntity, Boolean> {
+suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: MutableEntityStorage, project: Project): Pair<ModuleEntity, Boolean>? {
   val moduleId = ModuleId(this.formatAsModuleName(project))
-  println("toModuleEntity: Processing label '$this' -> moduleId: '${moduleId.name}'")
 
   // First check if module exists in the mutable storage (from previous calls in this batch)
   val existingInStorage = storage.resolve(moduleId)
   if (existingInStorage != null) {
-    println("toModuleEntity: Found existing module entity in mutable storage for '$this' with entitySource: ${existingInStorage.entitySource::class.simpleName}")
     // For existing modules, check if it's a test module from the cached target
     val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
     val isTestModule = (cachedTarget?.kind?.ruleType == RuleType.TEST)
@@ -411,25 +397,19 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
   // Then check if module exists in the immutable snapshot
   val existingModule = snapshot.resolve(moduleId)
   if (existingModule != null) {
-    println("toModuleEntity: Found existing module entity in snapshot for '$this' with entitySource: ${existingModule.entitySource::class.simpleName}")
     // For existing modules, check if it's a test module from the cached target
     val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
     val isTestModule = cachedTarget?.kind?.ruleType == RuleType.TEST
     return existingModule to isTestModule
   }
 
-  println("toModuleEntity: No existing module found for '$this', creating new module entity")
-
   // Try to get build target information from TargetUtils first (for synced targets)
-  val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
-  var targetInfoFromPartialSync: TargetInfo? = null
+  var cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
   val dependencies = mutableListOf<ModuleDependencyItem>()
 
-  println("toModuleEntity: Cached target lookup for '$this': ${if (cachedTarget != null) "FOUND (${cachedTarget::class.simpleName})" else "NOT FOUND"}")
 
   // If target is not in cache, trigger a partial sync to fetch it
   if (cachedTarget == null) {
-    println("toModuleEntity: Target '$this' not in cache, triggering partial sync...")
     try {
       val partialSyncResult = project.connection.runWithServer { server ->
         server.workspaceBuildTargets(
@@ -438,16 +418,15 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
           )
         )
       }
-      println("toModuleEntity: Partial sync completed for '$this', fetched ${partialSyncResult.targets.size} targets: ${partialSyncResult.targets.keys.joinToString(", ")}")
 
       // Extract the target info from the partial sync result
       // RawAspectTarget wraps BspTargetInfo.TargetInfo which contains the raw target data
       val rawAspectTarget = partialSyncResult.targets[this]
       if (rawAspectTarget != null) {
-        targetInfoFromPartialSync = rawAspectTarget.target
-        val targetInfo = targetInfoFromPartialSync
-        println("toModuleEntity: Extracted target info from partial sync for '$this'")
-        println("toModuleEntity: Target kind: ${targetInfo.kind}, dependencies: ${targetInfo.dependenciesCount}")
+        val targetInfo = rawAspectTarget.target
+        if (targetInfo.tagsList.contains(NO_IDE)) {
+          return null
+        }
 
         // Add SDK Dependency
         val languages = inferLanguages(targetInfo)
@@ -491,73 +470,45 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
             data = null, // Will be set by language-specific processors in full sync
             lowPrioritySharedSources = emptyList()
           )
-
-          // Save the target to TargetUtils using setTargets (marked @TestOnly but needed here)
           project.targetUtils.addTargets(mapOf(this to rawBuildTarget))
-
-          println("toModuleEntity: ✓ Successfully saved target '$this' to TargetUtils with ${sources.size} sources and ${dependencies.size} dependencies")
+          cachedTarget = rawBuildTarget
         } catch (e: Exception) {
-          println("toModuleEntity: Failed to save target '$this' to TargetUtils: ${e.message}")
           e.printStackTrace()
         }
       } else {
-        println("toModuleEntity: WARNING - Target '$this' not found in partial sync result")
+        return null
       }
     } catch (ex: Exception) {
-      println("toModuleEntity: Failed to trigger partial sync for '$this': ${ex.message}")
       ex.printStackTrace()
+      return null
     }
   }
 
   // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
   val isTestModule = project.targetUtils.getBuildTargetForLabel(this)?.kind?.ruleType == RuleType.TEST
-
-  // Create dependencies based on build target information if available
-
   if (cachedTarget != null) {
-    val target = cachedTarget
-
-    // Add module dependencies from target dependencies
-    if (target is RawBuildTarget) {
-      println("toModuleEntity: Processing ${target.dependencies.size} dependencies for target '$this'")
-      val moduleDeps = target.dependencies.map { dependencyLabel ->
-        println("toModuleEntity: Checking dependency '$dependencyLabel'")
-
+    // Update dependencies for existing modules
+    if (cachedTarget is RawBuildTarget) {
+      val moduleDeps = cachedTarget.dependencies.map { dependencyLabel ->
         // Check if this dependency is a library target using TargetKind
-        val depTarget = project.targetUtils.getBuildTargetForLabel(dependencyLabel)
-        val isLibraryDep = depTarget?.kind?.ruleType == RuleType.LIBRARY
-
-        println("toModuleEntity: Dependency '$dependencyLabel' - depTarget found: ${depTarget != null}, " +
-                "ruleType: ${depTarget?.kind?.ruleType}, isLibrary: $isLibraryDep")
-
         val baseDependencyName = dependencyLabel.formatAsModuleName(project)
-        // If it's a library, try to use the library module version (with prefix) if it exists
-        val depModuleName = if (isLibraryDep) {
+        // First, check if a module with the base name exists in the snapshot
+        val baseModuleId = ModuleId(baseDependencyName)
+        val baseModuleExists = snapshot.resolve(baseModuleId) != null || storage.resolve(baseModuleId) != null
+        val depModuleName = if (baseModuleExists) {
+          // Module exists, use it
+          baseDependencyName
+        } else {
+          // Module doesn't exist, check if a library module with prefix exists
           val libraryModuleName = baseDependencyName.addLibraryModulePrefix()
-          println("toModuleEntity: Checking for library module '$libraryModuleName' in workspace model")
-
-          // Check if the library module exists in the workspace model snapshot
           val libraryModuleId = ModuleId(libraryModuleName)
-          val existsInSnapshot = snapshot.resolve(libraryModuleId) != null
-          val existsInStorage = storage.resolve(libraryModuleId) != null
-          val libraryModuleExists = existsInSnapshot || existsInStorage
-
-          println("toModuleEntity: Library module '$libraryModuleName' - existsInSnapshot: $existsInSnapshot, " +
-                  "existsInStorage: $existsInStorage, total exists: $libraryModuleExists")
-
+          val libraryModuleExists = snapshot.resolve(libraryModuleId) != null || storage.resolve(libraryModuleId) != null
           if (libraryModuleExists) {
-            println("toModuleEntity: ✓ Using library module '$libraryModuleName' for dependency '$dependencyLabel'")
             libraryModuleName
           } else {
-            println("toModuleEntity: ✗ Library module '$libraryModuleName' not found, using base name '$baseDependencyName' for dependency '$dependencyLabel'")
             baseDependencyName
           }
-        } else {
-          println("toModuleEntity: Not a library dependency, using base name '$baseDependencyName'")
-          baseDependencyName
         }
-
-        println("toModuleEntity: Adding module dependency '$dependencyLabel' -> module: '$depModuleName' (isLibrary: $isLibraryDep)")
         // Use interners to deduplicate instances, matching ModuleEntityUpdater pattern
         moduleDependencyInterner.intern(
           ModuleDependency(
@@ -569,79 +520,19 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
         ) as ModuleDependency
       }
       dependencies.addAll(moduleDeps)
-      println("toModuleEntity: ✓ Successfully added ${moduleDeps.size} module dependencies for target '$this': [${target.dependencies.joinToString(", ")}]")
-    } else {
-      println("toModuleEntity: Target '$this' is not RawBuildTarget (type: ${target::class.simpleName}), no module dependencies extracted")
     }
-  } else if (targetInfoFromPartialSync != null) {
-    // Extract dependencies from partial sync result
-    println("toModuleEntity: Processing ${targetInfoFromPartialSync.dependenciesCount} dependencies from partial sync for target '$this'")
-    val targetInfo = targetInfoFromPartialSync
-    val moduleDeps = targetInfo.dependenciesList.map { dependency ->
-      val dependencyLabel = Label.parse(dependency.id)
-      println("toModuleEntity: [Partial Sync] Checking dependency '$dependencyLabel'")
-
-      val baseDependencyName = dependencyLabel.formatAsModuleName(project)
-
-      // First, check if a module with the base name exists in the snapshot
-      val baseModuleId = ModuleId(baseDependencyName)
-      val baseModuleExists = snapshot.resolve(baseModuleId) != null || storage.resolve(baseModuleId) != null
-      println("toModuleEntity: [Partial Sync] Base module '$baseDependencyName' exists: $baseModuleExists")
-
-      val depModuleName = if (baseModuleExists) {
-        // Module exists, use it
-        println("toModuleEntity: [Partial Sync] ✓ Using base module '$baseDependencyName' for dependency '$dependencyLabel'")
-        baseDependencyName
-      } else {
-        // Module doesn't exist, check if a library module with prefix exists
-        val libraryModuleName = baseDependencyName.addLibraryModulePrefix()
-        val libraryModuleId = ModuleId(libraryModuleName)
-        val libraryModuleExists = snapshot.resolve(libraryModuleId) != null || storage.resolve(libraryModuleId) != null
-
-        println("toModuleEntity: [Partial Sync] Library module '$libraryModuleName' exists: $libraryModuleExists")
-
-        if (libraryModuleExists) {
-          println("toModuleEntity: [Partial Sync] ✓ Using library module '$libraryModuleName' for dependency '$dependencyLabel'")
-          libraryModuleName
-        } else {
-          println("toModuleEntity: [Partial Sync] ✗ Neither base module nor library module found, using base name '$baseDependencyName'")
-          baseDependencyName
-        }
-      }
-
-      println("toModuleEntity: [Partial Sync] Adding module dependency '$dependencyLabel' -> module: '$depModuleName'")
-      // Use interners to deduplicate instances, matching ModuleEntityUpdater pattern
-      moduleDependencyInterner.intern(
-        ModuleDependency(
-          module = moduleIdInterner.intern(ModuleId(depModuleName)) as ModuleId,
-          exported = true,
-          scope = if (isTestModule) DependencyScope.TEST else DependencyScope.COMPILE,
-          productionOnTest = true
-        )
-      ) as ModuleDependency
-    }
-    dependencies.addAll(moduleDeps)
-    println("toModuleEntity: [Partial Sync] ✓ Successfully added ${moduleDeps.size} module dependencies from partial sync: [${targetInfo.dependenciesList.joinToString(", ") { it.id }}]")
-  } else {
-    println("toModuleEntity: No cached target or partial sync data found for '$this', creating module with empty dependencies")
   }
-
   // Use BazelModuleEntitySource for dynamically created modules
   // Note: We can't use the full JPS entity source logic from ModuleEntityUpdater here because
   // BazelProjectModelExternalSource is not accessible from this package due to module boundaries.
   // Dynamically created modules (added via file listener) should use BazelModuleEntitySource.
   val entitySource = BazelModuleEntitySource(moduleId.name)
-  println("toModuleEntity: Using BazelModuleEntitySource for '$this'")
-
   val moduleEntity = ModuleEntity(
     name = moduleId.name,
     dependencies = dependencies,
     entitySource = entitySource,
   )
-
   val addedEntity = storage.addEntity(moduleEntity)
-  println("toModuleEntity: Successfully created module entity for '$this' - name: '${moduleEntity.name}', isTestModule: $isTestModule, dependencies: ${dependencies.size}, entitySource: ${entitySource::class.simpleName}")
-
   return addedEntity to isTestModule
 }
 
@@ -661,7 +552,6 @@ fun VirtualFileUrl.addToModule(
       "kt" -> SourceRootTypeId("kotlin-source") // Kotlin uses same type for test and production
       "py" -> SourceRootTypeId("python-source") // Python uses same type for test and production
       else -> {
-        println("addToModule: Bazel recognised a file as a source, but we failed to parse its extension: .$extension")
         SourceRootTypeId("unknown-source")
       }
     }
@@ -685,6 +575,18 @@ fun VirtualFileUrl.addToModule(
   entityStorageDiff.modifyModuleEntity(module) { contentRoots += contentRootEntity }
 }
 
+private fun findContentRoots(module: ModuleEntity, url: VirtualFileUrl): List<ContentRootEntity> =
+  module.contentRoots.filter { it.url == url }
+
+private const val PROCESSING_DELAY = 250L // not noticeable by the user, but if there are many events simultaneously, we will get them all
+
+private const val PROGRESS_DELETE_STEP_SIZE = 20
+private const val PROGRESS_QUERY_STEP_SIZE = 80
+
+
+// TODO: these infer functions are copy pasted from other class that are under work from Jetbrains
+//  use the properly refactored public util functions instead when available
+
 private fun inferKind(
   tags: Set<Tag>,
   kindString: String,
@@ -704,7 +606,6 @@ private fun inferKind(
   )
 }
 
-// TODO: this is a another re-creation of `Language.allOfKind`. To be removed when this becomes public from upstream
 private val languagesFromKinds: Map<String, Set<LanguageClass>> =
   mapOf(
     "java_library" to setOf(LanguageClass.JAVA),
@@ -733,7 +634,6 @@ private val languagesFromKinds: Map<String, Set<LanguageClass>> =
 
 private fun inferLanguages(target: TargetInfo): Set<LanguageClass> =
   buildSet {
-    // TODO It's a hack preserved from before TargetKind refactorking, to be removed
     if (target.hasJvmTargetInfo()) {
       add(LanguageClass.JAVA)
     }
@@ -747,12 +647,3 @@ private fun inferLanguages(target: TargetInfo): Set<LanguageClass> =
       addAll(it)
     }
   }
-
-
-private fun findContentRoots(module: ModuleEntity, url: VirtualFileUrl): List<ContentRootEntity> =
-  module.contentRoots.filter { it.url == url }
-
-private const val PROCESSING_DELAY = 250L // not noticeable by the user, but if there are many events simultaneously, we will get them all
-
-private const val PROGRESS_DELETE_STEP_SIZE = 20
-private const val PROGRESS_QUERY_STEP_SIZE = 80
