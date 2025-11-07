@@ -49,26 +49,20 @@ class AddFileToModuleAction :
           text = BazelPluginBundle.message("file.change.processing.step.query"),
         ) {
           try {
-            println("Querying inverse sources for ${virtualFile.name}")
             askForInverseSources(project, url).targets.toList()
           } catch (ex: Exception) {
-            println("Failed to query inverse sources for ${virtualFile.name}: ${ex.message}")
             emptyList() // If query fails, return empty list
           }
         }
 
         if (targets.isNotEmpty()) {
-          println("Found targets ${targets.joinToString(", ") { it.targetName }} for ${virtualFile.name}")
 
           // Convert targets to module entities and add the file
           val modulesWithTestFlag = targets.mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
           for ((module, isTestModule) in modulesWithTestFlag) {
             val alreadyAdded = existingModules.contains(module)
             if (!alreadyAdded) {
-              println("Adding ${virtualFile.name} to module ${module.name} (test module: $isTestModule)")
               url.addToModule(entityStorageDiff, module, virtualFile.extension, isTestModule)
-            } else {
-              println("${virtualFile.name} is already added to module ${module.name}")
             }
           }
 
@@ -77,13 +71,10 @@ class AddFileToModuleAction :
 
           reporter.nextStep(endFraction = 100, text = BazelPluginBundle.message("file.change.processing.step.commit")) {
             // Apply changes to workspace model
-            println("Committing changes to workspace model for ${virtualFile.name}")
             workspaceModel.update("Add file to module (Bazel)") {
               it.applyChangesFrom(entityStorageDiff)
             }
           }
-        } else {
-          println("No targets found for ${virtualFile.name}, skipping module addition")
         }
       }
     }
