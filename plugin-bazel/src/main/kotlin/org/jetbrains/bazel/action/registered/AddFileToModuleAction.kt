@@ -56,7 +56,6 @@ class AddFileToModuleAction :
         }
 
         if (targets.isNotEmpty()) {
-
           // Convert targets to module entities and add the file
           val modulesWithTestFlag = targets.mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
           for ((module, isTestModule) in modulesWithTestFlag) {

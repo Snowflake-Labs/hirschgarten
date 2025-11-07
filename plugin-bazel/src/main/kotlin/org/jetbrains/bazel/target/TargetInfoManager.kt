@@ -202,7 +202,7 @@ internal class TargetInfoManager(
   }
 
 
-    fun reset(
+  fun reset(
     fileToTarget: Map<Path, List<Label>>,
     fileToExecutableTargets: Map<Path, List<Label>>,
     libraryItems: List<LibraryItem>?,

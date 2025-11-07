@@ -27,63 +27,41 @@ import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.platform.util.progress.SequentialProgressReporter
 import com.intellij.platform.util.progress.reportSequentialProgress
 import com.intellij.platform.workspace.jps.entities.ContentRootEntity
-import com.intellij.platform.workspace.jps.entities.DependencyScope
-import com.intellij.platform.workspace.jps.entities.ModuleDependency
 import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
 import com.intellij.platform.workspace.jps.entities.ModuleId
-import com.intellij.platform.workspace.jps.entities.SdkDependency
-import com.intellij.platform.workspace.jps.entities.SdkId
 import com.intellij.platform.workspace.jps.entities.SourceRootEntity
 import com.intellij.platform.workspace.jps.entities.SourceRootTypeId
 import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
 import com.intellij.platform.workspace.storage.ImmutableEntityStorage
 import com.intellij.platform.workspace.storage.MutableEntityStorage
-import com.intellij.platform.workspace.storage.SymbolicEntityId
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
-import com.intellij.util.containers.Interner
 import com.intellij.workspaceModel.ide.toPath
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.annotations.VisibleForTesting
-import org.jetbrains.bazel.commons.LanguageClass
 import org.jetbrains.bazel.commons.RuleType
-import org.jetbrains.bazel.commons.Tag
-import org.jetbrains.bazel.commons.TargetKind
 import org.jetbrains.bazel.config.BazelPluginBundle
-import org.jetbrains.bazel.config.defaultJdkName
 import org.jetbrains.bazel.config.isBazelProject
 import org.jetbrains.bazel.config.rootDir
 import org.jetbrains.bazel.coroutines.BazelCoroutineService
-import org.jetbrains.bazel.info.BspTargetInfo.TargetInfo
 import org.jetbrains.bazel.label.Label
 import org.jetbrains.bazel.magicmetamodel.formatAsModuleName
 import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelDummyEntitySource
 import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelModuleEntitySource
 import org.jetbrains.bazel.server.connection.connection
 import org.jetbrains.bazel.sync.status.SyncStatusService
-import org.jetbrains.bazel.sync.workspace.mapper.normal.TargetTagsResolver
 import org.jetbrains.bazel.target.TargetUtils
-import org.jetbrains.bazel.target.addLibraryModulePrefix
 import org.jetbrains.bazel.target.moduleEntity
 import org.jetbrains.bazel.target.targetUtils
 import org.jetbrains.bazel.utils.SourceType
 import org.jetbrains.bazel.utils.isSourceFile
-import org.jetbrains.bsp.protocol.BuildTargetTag.NO_IDE
 import org.jetbrains.bsp.protocol.InverseSourcesParams
 import org.jetbrains.bsp.protocol.InverseSourcesResult
-import org.jetbrains.bsp.protocol.RawBuildTarget
-import org.jetbrains.bsp.protocol.SourceItem
 import org.jetbrains.bsp.protocol.TextDocumentIdentifier
-import org.jetbrains.bsp.protocol.WorkspaceBuildTargetParams
-import org.jetbrains.bsp.protocol.WorkspaceBuildTargetSelector
 import java.nio.file.Path
-
-// Interners for deduplicating ModuleId and ModuleDependency objects, matching pattern in ModuleEntityUpdater
-private val moduleIdInterner: Interner<SymbolicEntityId<*>> = Interner.createWeakInterner()
-private val moduleDependencyInterner: Interner<ModuleDependencyItem> = Interner.createWeakInterner()
 
 internal class AssignFileToModuleListener : BulkFileListener {
   override fun after(events: MutableList<out VFileEvent>) {
@@ -368,7 +346,7 @@ private suspend fun queryTargetsForFile(project: Project, fileUrl: VirtualFileUr
       askForInverseSources(project, fileUrl)
         .targets
         .toList()
-    } catch (ex: Exception) {
+    } catch (_: Exception) {
       null
     }
   } else {
@@ -381,6 +359,7 @@ suspend fun askForInverseSources(project: Project, fileUrl: VirtualFileUrl): Inv
       .buildTargetInverseSources(InverseSourcesParams(TextDocumentIdentifier(fileUrl.toPath())))
   }
 
+// Convert a Label to a ModuleEntity, creating it from partial sync if it doesn't exist
 suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: MutableEntityStorage, project: Project): Pair<ModuleEntity, Boolean>? {
   val moduleId = ModuleId(this.formatAsModuleName(project))
 
@@ -406,121 +385,17 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
   var cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
   val dependencies = mutableListOf<ModuleDependencyItem>()
 
-
-  // If target is not in cache, trigger a partial sync to fetch it
+  // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
+  // If target is not in cache, trigger a partial sync to fetch it via UnsyncedTargetUpdater
   if (cachedTarget == null) {
-    try {
-      val partialSyncResult = project.connection.runWithServer { server ->
-        server.workspaceBuildTargets(
-          WorkspaceBuildTargetParams(
-            WorkspaceBuildTargetSelector.SpecificTargets(listOf(this))
-          )
-        )
-      }
-
-      // Extract the target info from the partial sync result
-      // RawAspectTarget wraps BspTargetInfo.TargetInfo which contains the raw target data
-      val rawAspectTarget = partialSyncResult.targets[this]
-      if (rawAspectTarget != null) {
-        val targetInfo = rawAspectTarget.target
-        if (targetInfo.tagsList.contains(NO_IDE)) {
-          return null
-        }
-
-        // Add SDK Dependency
-        val languages = inferLanguages(targetInfo)
-        if (languages.contains(LanguageClass.JAVA)) {
-          dependencies.add(SdkDependency(SdkId(project.defaultJdkName!!, "JavaSDK")))
-        }
-
-        // Transform the TargetInfo to RawBuildTarget and save to TargetUtils
-        // This is needed for features like "run test" button to work
-        try {
-          val targetKind = inferKind(TargetTagsResolver().resolveTags(targetInfo), targetInfo.kind, languages)
-          val baseDirectory = project.rootDir.toNioPath()
-
-          // Convert dependencies from protobuf format to Label list
-          val dependencies = targetInfo.dependenciesList.map { Label.parse(it.id) }
-
-          // Convert sources from protobuf format to SourceItem list
-          val sources = targetInfo.sourcesList.map { fileLocation ->
-            SourceItem(
-              path = baseDirectory.resolve(fileLocation.relativePath),
-              generated = !fileLocation.isSource,
-              jvmPackagePrefix = null
-            )
-          }
-
-          // Convert resources from protobuf format
-          val resources = targetInfo.resourcesList.map { fileLocation ->
-            baseDirectory.resolve(fileLocation.relativePath)
-          }
-
-          // Create a minimal RawBuildTarget from the TargetInfo
-          val rawBuildTarget = RawBuildTarget(
-            id = this,
-            tags = targetInfo.tagsList,
-            dependencies = dependencies,
-            kind = targetKind,
-            sources = sources,
-            resources = resources,
-            baseDirectory = baseDirectory,
-            noBuild = false,
-            data = null, // Will be set by language-specific processors in full sync
-            lowPrioritySharedSources = emptyList()
-          )
-          project.targetUtils.addTargets(mapOf(this to rawBuildTarget))
-          cachedTarget = rawBuildTarget
-        } catch (e: Exception) {
-          e.printStackTrace()
-        }
-      } else {
-        return null
-      }
-    } catch (ex: Exception) {
-      ex.printStackTrace()
+    val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storage)
+    if (result == null) {
       return null
     }
+    cachedTarget = result.first
+    dependencies.addAll(result.second)
   }
-
-  // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
-  val isTestModule = project.targetUtils.getBuildTargetForLabel(this)?.kind?.ruleType == RuleType.TEST
-  if (cachedTarget != null) {
-    // Update dependencies for existing modules
-    if (cachedTarget is RawBuildTarget) {
-      val moduleDeps = cachedTarget.dependencies.map { dependencyLabel ->
-        // Check if this dependency is a library target using TargetKind
-        val baseDependencyName = dependencyLabel.formatAsModuleName(project)
-        // First, check if a module with the base name exists in the snapshot
-        val baseModuleId = ModuleId(baseDependencyName)
-        val baseModuleExists = snapshot.resolve(baseModuleId) != null || storage.resolve(baseModuleId) != null
-        val depModuleName = if (baseModuleExists) {
-          // Module exists, use it
-          baseDependencyName
-        } else {
-          // Module doesn't exist, check if a library module with prefix exists
-          val libraryModuleName = baseDependencyName.addLibraryModulePrefix()
-          val libraryModuleId = ModuleId(libraryModuleName)
-          val libraryModuleExists = snapshot.resolve(libraryModuleId) != null || storage.resolve(libraryModuleId) != null
-          if (libraryModuleExists) {
-            libraryModuleName
-          } else {
-            baseDependencyName
-          }
-        }
-        // Use interners to deduplicate instances, matching ModuleEntityUpdater pattern
-        moduleDependencyInterner.intern(
-          ModuleDependency(
-            module = moduleIdInterner.intern(ModuleId(depModuleName)) as ModuleId,
-            exported = false,
-            scope = if (isTestModule) DependencyScope.TEST else DependencyScope.COMPILE,
-            productionOnTest = true
-          )
-        ) as ModuleDependency
-      }
-      dependencies.addAll(moduleDeps)
-    }
-  }
+  val isTestModule = cachedTarget.kind.ruleType == RuleType.TEST
   // Use BazelModuleEntitySource for dynamically created modules
   // Note: We can't use the full JPS entity source logic from ModuleEntityUpdater here because
   // BazelProjectModelExternalSource is not accessible from this package due to module boundaries.
@@ -581,68 +456,3 @@ private const val PROCESSING_DELAY = 250L // not noticeable by the user, but if 
 
 private const val PROGRESS_DELETE_STEP_SIZE = 20
 private const val PROGRESS_QUERY_STEP_SIZE = 80
-
-
-// TODO: these infer functions are copy pasted from other class that are under work from Jetbrains
-//  use the properly refactored public util functions instead when available
-
-private fun inferKind(
-  tags: Set<Tag>,
-  kindString: String,
-  languages: Set<LanguageClass>,
-): TargetKind {
-  val ruleType =
-    when {
-      tags.contains(Tag.TEST) -> RuleType.TEST
-      tags.contains(Tag.APPLICATION) -> RuleType.BINARY
-      tags.contains(Tag.LIBRARY) -> RuleType.LIBRARY
-      else -> RuleType.UNKNOWN
-    }
-  return TargetKind(
-    kindString = kindString,
-    languageClasses = languages,
-    ruleType = ruleType,
-  )
-}
-
-private val languagesFromKinds: Map<String, Set<LanguageClass>> =
-  mapOf(
-    "java_library" to setOf(LanguageClass.JAVA),
-    "java_binary" to setOf(LanguageClass.JAVA),
-    "java_test" to setOf(LanguageClass.JAVA),
-    // a workaround to register this target type as Java module in IntelliJ IDEA
-    "intellij_plugin_debug_target" to setOf(LanguageClass.JAVA),
-    "kt_jvm_library" to setOf(LanguageClass.JAVA, LanguageClass.KOTLIN),
-    "kt_jvm_binary" to setOf(LanguageClass.JAVA, LanguageClass.KOTLIN),
-    "kt_jvm_test" to setOf(LanguageClass.JAVA, LanguageClass.KOTLIN),
-    "scala_library" to setOf(LanguageClass.JAVA, LanguageClass.SCALA),
-    "scala_binary" to setOf(LanguageClass.JAVA, LanguageClass.SCALA),
-    "scala_test" to setOf(LanguageClass.JAVA, LanguageClass.SCALA),
-    // rules_jvm from IntelliJ monorepo
-    "jvm_library" to setOf(LanguageClass.JAVA, LanguageClass.KOTLIN),
-    "jvm_binary" to setOf(LanguageClass.JAVA, LanguageClass.KOTLIN),
-    "jvm_resources" to setOf(LanguageClass.JAVA, LanguageClass.KOTLIN),
-    "go_binary" to setOf(LanguageClass.GO),
-    "go_test" to setOf(LanguageClass.GO),
-    "go_library" to setOf(LanguageClass.GO),
-    "go_source" to setOf(LanguageClass.GO),
-    "py_binary" to setOf(LanguageClass.PYTHON),
-    "py_test" to setOf(LanguageClass.PYTHON),
-    "py_library" to setOf(LanguageClass.PYTHON),
-  )
-
-private fun inferLanguages(target: TargetInfo): Set<LanguageClass> =
-  buildSet {
-    if (target.hasJvmTargetInfo()) {
-      add(LanguageClass.JAVA)
-    }
-    if (target.hasPythonTargetInfo()) {
-      add(LanguageClass.PYTHON)
-    }
-    if (target.hasGoTargetInfo()) {
-      add(LanguageClass.GO)
-    }
-    languagesFromKinds[target.kind]?.let {
-      addAll(it)
-    }
-  }
