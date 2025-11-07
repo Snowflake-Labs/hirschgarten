@@ -360,25 +360,18 @@ suspend fun askForInverseSources(project: Project, fileUrl: VirtualFileUrl): Inv
   }
 
 // Convert a Label to a ModuleEntity, creating it from partial sync if it doesn't exist
-suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: MutableEntityStorage, project: Project): Pair<ModuleEntity, Boolean>? {
+suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storageUpdates: MutableEntityStorage, project: Project): Pair<ModuleEntity, Boolean>? {
   val moduleId = ModuleId(this.formatAsModuleName(project))
 
   // First check if module exists in the mutable storage (from previous calls in this batch)
-  val existingInStorage = storage.resolve(moduleId)
+  // note in short, the snapshot + the mutable storage = the current state
+  // the storage updates here contains already commited changes that are not pushed into the final module storage
+  val existingInStorage = storageUpdates.resolve(moduleId) ?: snapshot.resolve(moduleId)
   if (existingInStorage != null) {
     // For existing modules, check if it's a test module from the cached target
     val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
     val isTestModule = (cachedTarget?.kind?.ruleType == RuleType.TEST)
     return existingInStorage to isTestModule
-  }
-
-  // Then check if module exists in the immutable snapshot
-  val existingModule = snapshot.resolve(moduleId)
-  if (existingModule != null) {
-    // For existing modules, check if it's a test module from the cached target
-    val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
-    val isTestModule = cachedTarget?.kind?.ruleType == RuleType.TEST
-    return existingModule to isTestModule
   }
 
   // Try to get build target information from TargetUtils first (for synced targets)
@@ -388,7 +381,7 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
   // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
   // If target is not in cache, trigger a partial sync to fetch it via UnsyncedTargetUpdater
   if (cachedTarget == null) {
-    val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storage)
+    val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storageUpdates)
     if (result == null) {
       return null
     }
@@ -406,7 +399,7 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storage: Muta
     dependencies = dependencies,
     entitySource = entitySource,
   )
-  val addedEntity = storage.addEntity(moduleEntity)
+  val addedEntity = storageUpdates.addEntity(moduleEntity)
   return addedEntity to isTestModule
 }
 
