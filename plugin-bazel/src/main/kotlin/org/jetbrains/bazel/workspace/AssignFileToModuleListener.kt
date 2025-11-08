@@ -60,6 +60,7 @@ import org.jetbrains.bazel.utils.SourceType
 import org.jetbrains.bazel.utils.isSourceFile
 import org.jetbrains.bsp.protocol.InverseSourcesParams
 import org.jetbrains.bsp.protocol.InverseSourcesResult
+import org.jetbrains.bsp.protocol.RawBuildTarget
 import org.jetbrains.bsp.protocol.TextDocumentIdentifier
 import java.nio.file.Path
 
@@ -367,24 +368,25 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storageUpdate
   // note in short, the snapshot + the mutable storage = the current state
   // the storage updates here contains already commited changes that are not pushed into the final module storage
   val existingInStorage = storageUpdates.resolve(moduleId) ?: snapshot.resolve(moduleId)
-  var cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
+  val cachedTarget = project.targetUtils.getBuildTargetForLabel(this)
+  val isTestModuleFromCachedTarget = (cachedTarget?.kind?.ruleType == RuleType.TEST)
   if (existingInStorage != null) {
     // For existing modules, check if it's a test module from the cached target
-    val isTestModule = (cachedTarget?.kind?.ruleType == RuleType.TEST)
-    return existingInStorage to isTestModule
+    return existingInStorage to isTestModuleFromCachedTarget
   }
 
   // Try to get build target information from TargetUtils first (for synced targets)
   val dependencies = mutableListOf<ModuleDependencyItem>()
+  var createdTarget: RawBuildTarget? = null
 
   // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
   // If target is not in cache, trigger a partial sync to fetch it via UnsyncedTargetUpdater
   if (cachedTarget == null) {
     val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storageUpdates) ?: return null
-    cachedTarget = result.first
+    createdTarget = result.first
     dependencies.addAll(result.second)
   }
-  val isTestModule = cachedTarget.kind.ruleType == RuleType.TEST
+  val isTestModule = if (cachedTarget != null) isTestModuleFromCachedTarget else (createdTarget?.kind?.ruleType == RuleType.TEST)
   // Use BazelModuleEntitySource for dynamically created modules
   // Note: We can't use the full JPS entity source logic from ModuleEntityUpdater here because
   // BazelProjectModelExternalSource is not accessible from this package due to module boundaries.
