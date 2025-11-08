@@ -183,6 +183,25 @@ internal class TargetInfoManager(
     }
   }
 
+  fun addTargets(labelToTargetInfo: Map<Label, BuildTarget>) {
+    val hashStream = createHashStream128()
+    for ((label, info) in labelToTargetInfo) {
+      // must be canonical label
+      this.labelToTargetInfo.put(
+        computeLabelHash(label as ResolvedLabel, hashStream),
+        PartialBuildTarget(
+          id = info.id,
+          tags = info.tags,
+          kind = info.kind,
+          baseDirectory = info.baseDirectory,
+          data = info.data,
+          noBuild = info.noBuild,
+        ),
+      )
+    }
+  }
+
+
   fun reset(
     fileToTarget: Map<Path, List<Label>>,
     fileToExecutableTargets: Map<Path, List<Label>>,

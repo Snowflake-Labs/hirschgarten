@@ -8,6 +8,7 @@ kt_jvm_library(
     ]),
     visibility = ["//plugin-bazel:__subpackages__"],
     deps = [
+        "//plugin-bazel/src/main/kotlin/org/jetbrains/bazel/sync/targetKind",
         "//commons/src/main/kotlin/org/jetbrains/bsp/protocol",
         "//plugin-bazel/src/main/kotlin/org/jetbrains/bazel/config",
         "//plugin-bazel/src/main/kotlin/org/jetbrains/bazel/coroutines",
