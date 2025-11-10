@@ -183,7 +183,7 @@ internal class TargetInfoManager(
     }
   }
 
-  fun addTargets(labelToTargetInfo: Map<Label, BuildTarget>) {
+  fun addTargets(labelToTargetInfo: Map<Label, BuildTarget>, project: Project) {
     val hashStream = createHashStream128()
     for ((label, info) in labelToTargetInfo) {
       // must be canonical label
@@ -198,6 +198,7 @@ internal class TargetInfoManager(
           noBuild = info.noBuild,
         ),
       )
+      moduleIdToTarget.put(stringToHashId(label.formatAsModuleName(project)), label)
     }
   }
 
