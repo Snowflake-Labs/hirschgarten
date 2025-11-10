@@ -105,7 +105,7 @@ class UnsyncedTargetUpdater {
               data = null, // Will be set by language-specific processors in full sync
               lowPrioritySharedSources = emptyList()
             )
-            project.targetUtils.addTargets(mapOf(label to rawBuildTarget))
+            project.targetUtils.addTargets(mapOf(label to rawBuildTarget), project)
 
             // Add module dependencies
             val moduleDeps = buildModuleDependencies(
