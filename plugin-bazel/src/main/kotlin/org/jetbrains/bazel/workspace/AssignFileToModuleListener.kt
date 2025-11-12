@@ -268,6 +268,36 @@ private suspend fun processFileEvent(
   }
 }
 
+/**
+ * Public function that allows external plugins to trigger file-to-module assignment.
+ * Called by FileToModuleAssignmentService.
+ */
+internal suspend fun processFileForAssignment(
+  newFile: VirtualFile,
+  project: Project,
+  workspaceModel: WorkspaceModel,
+  entityStorageDiff: MutableEntityStorage,
+) {
+  val existingModules =
+    getModulesForFile(newFile, project)
+      .filter { it.moduleEntity?.entitySource != BazelDummyEntitySource }
+      .mapNotNull { it.moduleEntity }
+  val url = newFile.toVirtualFileUrl(workspaceModel.getVirtualFileUrlManager())
+  val path = url.toPath()
+  val targets = queryTargetsForFile(project, url) ?: return
+
+  val modulesWithTestFlag =
+    targets.mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
+
+  for ((module, isTestModule) in modulesWithTestFlag) {
+    val alreadyAdded = existingModules.contains(module)
+    if (!alreadyAdded) {
+      url.addToModule(entityStorageDiff, module, newFile.extension, isTestModule)
+    }
+  }
+  project.targetUtils.addFileToTargetIdEntry(path, targets)
+}
+
 private fun VFileEvent.getProgressMessage(newFile: VirtualFile?): String =
   when (this) {
     is VFileCreateEvent -> BazelPluginBundle.message("file.change.processing.title.create", newFile?.name ?: "")
@@ -283,6 +313,7 @@ private suspend fun processFileCreated(
   progressReporter: SequentialProgressReporter,
   mutableRemovalMap: MutableMap<ModuleEntity, List<ContentRootEntity>>,
 ) {
+  // Allow extension points to intercept before processing
   val existingModules =
     getModulesForFile(newFile, project)
       .filter { it.moduleEntity?.entitySource != BazelDummyEntitySource }

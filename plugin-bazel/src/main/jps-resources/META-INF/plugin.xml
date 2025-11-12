@@ -403,6 +403,7 @@
       serviceImplementation="org.jetbrains.bazel.services.BazelBaseProjectDirectories"
       serviceInterface="com.intellij.openapi.project.BaseProjectDirectories"
     />
+    <projectService serviceImplementation="org.jetbrains.bazel.workspace.FileToModuleAssignmentService"/>
     <moduleService
       overrides="true"
       serviceImplementation="org.jetbrains.bazel.services.BazelModuleFileIndex"
