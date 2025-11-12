@@ -234,10 +234,10 @@ public class MyBuildFileModifier {
 
 ## Best Practices
 
-1. **Always save documents** before calling `assignFileToModules()`
-2. **Check return values** - The service may silently skip non-source files
-3. **Don't call too frequently** - Batch multiple file assignments if possible
-4. **Handle errors gracefully** - Bazel queries can fail for various reasons
+1. **Always save documents** before calling `assignFileToModules()` - This is critical since Bazel reads from disk
+2. **Verify file types before calling** - The service silently ignores non-source files (e.g., `.txt`, `.md`), so check the file extension beforehand if needed
+3. **Don't call too frequently** - Batch multiple file assignments if possible, as each call triggers a Bazel query
+4. **Handle asynchronous behavior** - The method returns immediately but processing happens in the background
 5. **Test with different file types** - Ensure your code works with Java, Kotlin, Python, etc.
 
 ## Related APIs

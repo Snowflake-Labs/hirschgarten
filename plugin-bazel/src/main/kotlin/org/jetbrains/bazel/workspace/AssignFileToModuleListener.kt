@@ -269,8 +269,8 @@ private suspend fun processFileEvent(
 }
 
 /**
- * Public function that allows external plugins to trigger file-to-module assignment.
- * Called by FileToModuleAssignmentService.
+ * Internal function that allows FileToModuleAssignmentService to trigger file-to-module assignment.
+ * This is not exposed outside the module - external plugins should use FileToModuleAssignmentService instead.
  */
 internal suspend fun processFileForAssignment(
   newFile: VirtualFile,
