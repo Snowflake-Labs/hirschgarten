@@ -201,6 +201,11 @@
                     interface="org.jetbrains.bazel.run.test.BazelTestLocatorProvider"
                     dynamic="true"
     />
+    <extensionPoint
+      dynamic="true"
+      interface="org.jetbrains.bazel.workspace.BazelFileEventSubmitter"
+      qualifiedName="org.jetbrains.bazel.fileEventSubmitter"
+    />
   </extensionPoints>
 
   <!-- it needs to be here, not in withKotlin.xml because plugin loader checks only this file -->
