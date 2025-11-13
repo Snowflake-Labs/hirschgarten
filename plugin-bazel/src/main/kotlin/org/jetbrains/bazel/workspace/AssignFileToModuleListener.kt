@@ -294,10 +294,7 @@ private suspend fun processFileCreated(
       endFraction = PROGRESS_QUERY_STEP_SIZE,
       text = BazelPluginBundle.message("file.change.processing.step.query"),
     ) { queryTargetsForFile(project, url) } ?: return
-
-  // Process targets for .testlib stripping
   val processedResult = processTargetsForTestlibStripping(targets)
-
   val modulesWithTestFlag =
     processedResult.allProcessedTargets
       .mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }

@@ -26,7 +26,6 @@ import org.jetbrains.bazel.workspace.getModulesForFile
 import org.jetbrains.bazel.workspace.processTargetsForTestlibStripping
 import org.jetbrains.bazel.workspace.toModuleEntity
 
-
 class AddFileToModuleAction :
   SuspendableAction({ BazelPluginBundle.message("add.file.to.module.action.text") }, BazelPluginIcons.bazel) {
 
@@ -54,19 +53,16 @@ class AddFileToModuleAction :
           try {
             askForInverseSources(project, url).targets.toList()
           } catch (ex: Exception) {
-            emptyList() // If query fails, return empty list
+            emptyList()
           }
         }
 
         if (targets.isNotEmpty()) {
           val processedResult = processTargetsForTestlibStripping(targets)
-
-          // Convert targets to module entities
           val modulesWithTestFlag = processedResult.allProcessedTargets.mapNotNull {
             it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project)
           }
 
-          // Precompute a map from module names to labels for efficient lookup
           val moduleNameToLabel = processedResult.allProcessedTargets.associateBy { it.formatAsModuleName(project) }
           // Add file only to non-stripped targets (original .testlib targets)
           for ((module, isTestModule) in modulesWithTestFlag) {
@@ -74,16 +70,13 @@ class AddFileToModuleAction :
             val isStripped = moduleLabel != null && processedResult.strippedLabels.contains(moduleLabel)
             val alreadyAdded = existingModules.contains(module)
             if (!alreadyAdded && !isStripped) {
-              // Only add sources to original .testlib targets, not to stripped targets
               url.addToModule(entityStorageDiff, module, virtualFile.extension, isTestModule)
             }
           }
 
           // Store only stripped targets (not original .testlib) in target utils mapping
           project.targetUtils.addFileToTargetIdEntry(path, processedResult.targetsForMapping)
-
           reporter.nextStep(endFraction = 100, text = BazelPluginBundle.message("file.change.processing.step.commit")) {
-            // Apply changes to workspace model
             workspaceModel.update("Add file to module (Bazel)") {
               it.applyChangesFrom(entityStorageDiff)
             }

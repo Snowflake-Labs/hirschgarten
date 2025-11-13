@@ -95,7 +95,6 @@ class BazelProjectModelModifier(private val project: Project) : JavaProjectModel
     val ruleTarget = readAction {
       targetBuildFile.findRuleTarget(targetRuleLabel.targetName)
         ?: if (targetRuleLabel.targetName.containsTestlibSuffix()) {
-          // If target contains test library suffix, try with stripped name
           val strippedTargetName = targetRuleLabel.targetName.stripTestlibSuffix()
           targetBuildFile.findRuleTarget(strippedTargetName)
         } else null

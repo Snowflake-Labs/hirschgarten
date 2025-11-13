@@ -73,12 +73,12 @@ fun processTargetsForTestlibStripping(targets: List<Label>): ProcessedTargetsRes
       if (strippedLabel != null) {
         strippedLabels.add(strippedLabel)
         originalLabelsWithStrippedVersion.add(label)
-        listOf(label, strippedLabel) // Keep both original and stripped
+        listOf(label, strippedLabel)
       } else {
-        listOf(label) // Keep only original if we couldn't strip
+        listOf(label)
       }
     } else {
-      listOf(label) // Keep as-is if no .testlib
+      listOf(label)
     }
   }
 

@@ -52,7 +52,6 @@ private class TargetUtilsSyncHook : ProjectSyncHook {
     for (target in targets) {
       target as RawBuildTarget
       if (target.kind.ruleType == org.jetbrains.bazel.commons.RuleType.TEST && target.sources.isEmpty()) {
-        // Try all known testlib suffixes
         for (suffix in TESTLIB_SUFFIXES) {
           val testlibLabel = try {
             Label.parse("${target.id}$suffix")
@@ -61,7 +60,7 @@ private class TargetUtilsSyncHook : ProjectSyncHook {
           }
           if (testlibLabel != null && labelToTarget.containsKey(testlibLabel)) {
             testlibToOwner[testlibLabel] = target.id
-            break // Found a match, no need to check other suffixes
+            break
           }
         }
       }
