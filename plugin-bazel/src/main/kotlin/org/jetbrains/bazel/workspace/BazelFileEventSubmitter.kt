@@ -5,7 +5,6 @@ import com.intellij.openapi.vfs.VirtualFile
 
 /**
  * Simple helper that lets external code enqueue a collection of source files for incremental Bazel processing.
- * No extension point indirection: depend on this class directly and call [submitFiles].
  */
 class AssignFileToModuleFileEventSubmitter {
   fun submitFiles(project: Project, files: Collection<VirtualFile>) {

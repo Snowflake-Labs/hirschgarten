@@ -163,8 +163,6 @@ class AssignFileToModuleListener : BulkFileListener {
   }
 
   companion object {
-    // Synthetic event type representing an externally submitted file creation.
-    // Must implement abstract members from VFileEvent.
     internal class ExternalFileCreateEvent(val createdFile: VirtualFile) : VFileEvent(createdFile.fileSystem) {
       override fun getFile(): VirtualFile = createdFile
       override fun getFileSystem() = createdFile.fileSystem
@@ -176,7 +174,6 @@ class AssignFileToModuleListener : BulkFileListener {
       override fun hashCode(): Int = createdFile.hashCode()
     }
 
-    // External plugin entry point.
     @JvmStatic
     fun enqueueExternalFile(project: Project, file: VirtualFile) {
       if (file.isDirectory || !file.isSourceFile()) return
