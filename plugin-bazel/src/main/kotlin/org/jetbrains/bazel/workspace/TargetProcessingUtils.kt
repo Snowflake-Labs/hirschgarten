@@ -13,7 +13,7 @@ val TESTLIB_SUFFIXES = listOf(".testlib", "-test-lib")
 /**
  * Checks if a target name contains any of the test library suffixes.
  */
-fun String.containsTestlibSuffix(): Boolean = TESTLIB_SUFFIXES.any { this.contains(it) }
+fun String.containsTestlibSuffix(): Boolean = TESTLIB_SUFFIXES.any { this.endsWith(it) }
 
 /**
  * Strips all test library suffixes from a target name.
@@ -21,7 +21,7 @@ fun String.containsTestlibSuffix(): Boolean = TESTLIB_SUFFIXES.any { this.contai
 fun String.stripTestlibSuffix(): String {
   var result = this
   for (suffix in TESTLIB_SUFFIXES) {
-    result = result.replace(suffix, "")
+    result = result.removeSuffix(suffix)
   }
   return result
 }
@@ -91,5 +91,3 @@ fun processTargetsForTestlibStripping(targets: List<Label>): ProcessedTargetsRes
     targetsForMapping = targetsForMapping
   )
 }
-
-

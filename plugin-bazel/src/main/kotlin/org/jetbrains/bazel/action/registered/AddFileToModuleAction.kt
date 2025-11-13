@@ -66,9 +66,11 @@ class AddFileToModuleAction :
             it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project)
           }
 
+          // Precompute a map from module names to labels for efficient lookup
+          val moduleNameToLabel = processedResult.allProcessedTargets.associateBy { it.formatAsModuleName(project) }
           // Add file only to non-stripped targets (original .testlib targets)
           for ((module, isTestModule) in modulesWithTestFlag) {
-            val moduleLabel = processedResult.allProcessedTargets.find { it.formatAsModuleName(project) == module.name }
+            val moduleLabel = moduleNameToLabel[module.name]
             val isStripped = moduleLabel != null && processedResult.strippedLabels.contains(moduleLabel)
             val alreadyAdded = existingModules.contains(module)
             if (!alreadyAdded && !isStripped) {

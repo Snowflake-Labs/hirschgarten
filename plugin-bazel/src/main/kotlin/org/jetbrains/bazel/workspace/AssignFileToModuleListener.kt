@@ -302,8 +302,10 @@ private suspend fun processFileCreated(
     processedResult.allProcessedTargets
       .mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
 
+  // Precompute a map from module names to labels for efficient lookup
+  val moduleNameToLabel = processedResult.allProcessedTargets.associateBy { it.formatAsModuleName(project) }
   for ((module, isTestModule) in modulesWithTestFlag) {
-    val moduleLabel = processedResult.allProcessedTargets.find { it.formatAsModuleName(project) == module.name }
+    val moduleLabel = moduleNameToLabel[module.name]
     val isStripped = moduleLabel != null && processedResult.strippedLabels.contains(moduleLabel)
 
     // if we want a file to be both added and removed in the same module, neither of them will be done
