@@ -14,15 +14,18 @@ import org.jetbrains.bazel.action.SuspendableAction
 import org.jetbrains.bazel.assets.BazelPluginIcons
 import org.jetbrains.bazel.config.BazelPluginBundle
 import org.jetbrains.bazel.config.isBazelProject
+import org.jetbrains.bazel.magicmetamodel.formatAsModuleName
+import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelDummyEntitySource
 import org.jetbrains.bazel.sync.status.isSyncInProgress
+import org.jetbrains.bazel.target.moduleEntity
+import org.jetbrains.bazel.target.targetUtils
 import org.jetbrains.bazel.utils.isSourceFile
+import org.jetbrains.bazel.workspace.addToModule
 import org.jetbrains.bazel.workspace.askForInverseSources
 import org.jetbrains.bazel.workspace.getModulesForFile
-import org.jetbrains.bazel.workspace.addToModule
+import org.jetbrains.bazel.workspace.processTargetsForTestlibStripping
 import org.jetbrains.bazel.workspace.toModuleEntity
-import org.jetbrains.bazel.target.targetUtils
-import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.BazelDummyEntitySource
-import org.jetbrains.bazel.target.moduleEntity
+
 
 class AddFileToModuleAction :
   SuspendableAction({ BazelPluginBundle.message("add.file.to.module.action.text") }, BazelPluginIcons.bazel) {
@@ -39,7 +42,7 @@ class AddFileToModuleAction :
         val existingModules = getModulesForFile(virtualFile, project)
           .filter { it.moduleEntity?.entitySource != BazelDummyEntitySource }
           .mapNotNull { it.moduleEntity }
-
+          .toSet()
         val url = virtualFile.toVirtualFileUrl(workspaceModel.getVirtualFileUrlManager())
         val path = url.toPath()
 
@@ -56,18 +59,26 @@ class AddFileToModuleAction :
         }
 
         if (targets.isNotEmpty()) {
-          // Convert targets to module entities and add the file
-          val modulesWithTestFlag = targets.mapNotNull { it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) }
+          val processedResult = processTargetsForTestlibStripping(targets)
 
+          // Convert targets to module entities
+          val modulesWithTestFlag = processedResult.allProcessedTargets.mapNotNull {
+            it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project)
+          }
+
+          // Add file only to non-stripped targets (original .testlib targets)
           for ((module, isTestModule) in modulesWithTestFlag) {
+            val moduleLabel = processedResult.allProcessedTargets.find { it.formatAsModuleName(project) == module.name }
+            val isStripped = moduleLabel != null && processedResult.strippedLabels.contains(moduleLabel)
             val alreadyAdded = existingModules.contains(module)
-            if (!alreadyAdded) {
+            if (!alreadyAdded && !isStripped) {
+              // Only add sources to original .testlib targets, not to stripped targets
               url.addToModule(entityStorageDiff, module, virtualFile.extension, isTestModule)
             }
           }
 
-          // Update the target utils mapping
-          project.targetUtils.addFileToTargetIdEntry(path, targets)
+          // Store only stripped targets (not original .testlib) in target utils mapping
+          project.targetUtils.addFileToTargetIdEntry(path, processedResult.targetsForMapping)
 
           reporter.nextStep(endFraction = 100, text = BazelPluginBundle.message("file.change.processing.step.commit")) {
             // Apply changes to workspace model
