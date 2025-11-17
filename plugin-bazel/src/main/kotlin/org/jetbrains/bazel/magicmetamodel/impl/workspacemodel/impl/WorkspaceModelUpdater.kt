@@ -21,6 +21,7 @@ class WorkspaceModelUpdater(
   project: Project,
   private val isAndroidSupportEnabled: Boolean,
   private val importIjars: Boolean,
+  private val defaultJdkName: String? = null,
 ) {
   private val workspaceModelEntityUpdaterConfig =
     WorkspaceModelEntityUpdaterConfig(
@@ -50,6 +51,7 @@ class WorkspaceModelUpdater(
         moduleEntities,
         libraryNames,
         libraryModuleNames,
+        defaultJdkName,
       )
     javaModuleUpdater.addEntities(moduleEntities.filterIsInstance<JavaModule>() + libraryModules)
     val libraryEntityUpdater = LibraryEntityUpdater(workspaceModelEntityUpdaterConfig, importIjars)
