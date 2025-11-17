@@ -21,7 +21,6 @@ import org.jetbrains.bazel.config.BazelPluginBundle
 import org.jetbrains.bazel.config.bazelProjectName
 import org.jetbrains.bazel.config.defaultJdkName
 import org.jetbrains.bazel.config.rootDir
-import org.jetbrains.bazel.extensionPoints.shouldImportJvmBinaryJars
 import org.jetbrains.bazel.label.Label
 import org.jetbrains.bazel.magicmetamodel.ProjectDetails
 import org.jetbrains.bazel.magicmetamodel.impl.TargetIdToModuleEntitiesMap
@@ -40,9 +39,7 @@ import org.jetbrains.bazel.sdkcompat.workspacemodel.entities.Module
 import org.jetbrains.bazel.server.client.IMPORT_SUBTASK_ID
 import org.jetbrains.bazel.sync.scope.FullProjectSync
 import org.jetbrains.bazel.sync.scope.ProjectSyncScope
-import org.jetbrains.bazel.sync.task.asyncQueryIf
 import org.jetbrains.bazel.sync.task.query
-import org.jetbrains.bazel.sync.task.queryIf
 import org.jetbrains.bazel.sync.workspace.BazelWorkspaceResolveService
 import org.jetbrains.bazel.target.sync.projectStructure.TargetUtilsProjectStructureDiff
 import org.jetbrains.bazel.target.targetUtils
@@ -64,7 +61,7 @@ class CollectProjectDetailsTask(
   private val diff: MutableEntityStorage,
   private val targetUtilsDiff: TargetUtilsProjectStructureDiff,
 ) {
-  private var uniqueJavaHomes: Set<Path>? = null
+  private var uniqueJavaHomes: List<Path>? = null
 
   private lateinit var javacOptions: Map<String, String>
 
@@ -91,6 +88,8 @@ class CollectProjectDetailsTask(
         }
       }
       project.defaultJdkName = projectDetails.defaultJdkName
+      // Set the project SDK in IntelliJ's Project Structure to match the default JDK
+      SdkUtils.setProjectSdk(project, projectDetails.defaultJdkName)
     }
 
     if (scalaSdkExtensionExists()) {
@@ -156,11 +155,15 @@ class CollectProjectDetailsTask(
         }
     }
 
-  private fun calculateAllUniqueJavaHomes(projectDetails: ProjectDetails): Set<Path> =
+  private fun calculateAllUniqueJavaHomes(projectDetails: ProjectDetails): List<Path> =
     projectDetails.targets
       .mapNotNull(::extractJvmBuildTarget)
-      .map { requireNotNull(it.javaHome) { "javaHome is null but expected not to be null for $it" } }
-      .toSet()
+      .mapNotNull { it.javaHome }
+      .groupingBy { it }
+      .eachCount()
+      .toList()
+      .sortedByDescending { it.second }
+      .map { it.first }
 
   private suspend fun calculateAllScalaSdkInfosSubtask(projectDetails: ProjectDetails) =
     project.syncConsole.withSubtask(
@@ -268,7 +271,8 @@ class CollectProjectDetailsTask(
               projectBasePath = projectBasePath,
               project = project,
               importIjars = projectDetails.workspaceContext?.importIjars ?: false,
-            )
+              defaultJdkName = projectDetails.defaultJdkName,
+              )
 
           workspaceModelUpdater.load(modulesToLoad, libraries, libraryModules)
           compiledSourceCodeInsideJarToExclude?.let { workspaceModelUpdater.loadCompiledSourceCodeInsideJarExclude(it) }
