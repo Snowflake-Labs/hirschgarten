@@ -3,9 +3,7 @@ package org.jetbrains.bazel.magicmetamodel.impl.workspacemodel.impl.updaters
 import com.intellij.java.workspace.entities.JavaModuleSettingsEntity
 import com.intellij.java.workspace.entities.javaSettings
 import com.intellij.openapi.extensions.ExtensionPointName
-import com.intellij.openapi.vfs.JarFileSystem
-import com.intellij.platform.backend.workspace.toVirtualFileUrl
-import com.intellij.platform.backend.workspace.virtualFile
+import com.intellij.platform.workspace.jps.entities.InheritedSdkDependency
 import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
 import com.intellij.platform.workspace.jps.entities.ModuleSourceDependency
@@ -14,7 +12,6 @@ import com.intellij.platform.workspace.jps.entities.SdkId
 import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.impl.url.toVirtualFileUrl
-import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.pom.java.LanguageLevel
 import org.jetbrains.bazel.config.BazelFeatureFlags
 import org.jetbrains.bazel.jpsCompilation.utils.JpsPaths
@@ -22,17 +19,15 @@ import org.jetbrains.bazel.magicmetamodel.impl.workspacemodel.impl.updaters.tran
 import org.jetbrains.bazel.scala.sdk.scalaSdkExtensionExists
 import org.jetbrains.bazel.workspacemodel.entities.JavaModule
 import org.jetbrains.bazel.workspacemodel.entities.Library
-import org.jetbrains.bazel.workspacemodel.entities.Module
-import org.jetbrains.bazel.settings.bazel.bazelJVMProjectSettings
 import java.nio.file.Path
-import kotlin.io.path.extension
 
 class JavaModuleWithSourcesUpdater(
   private val workspaceModelEntityUpdaterConfig: WorkspaceModelEntityUpdaterConfig,
   private val projectBasePath: Path,
   moduleEntities: List<Module>,
   private val libraries: Map<String, Library>,
-) : WorkspaceModelEntityWithoutParentModuleUpdater<JavaModule, ModuleEntity> {
+  private val defaultJdkName: String? = null,
+  ) : WorkspaceModelEntityWithoutParentModuleUpdater<JavaModule, ModuleEntity> {
   val packageMarkerEntityUpdater =
     PackageMarkerEntityUpdater(
       workspaceModelEntityUpdaterConfig,
@@ -89,8 +84,12 @@ class JavaModuleWithSourcesUpdater(
 
   private fun calculateJavaModuleDependencies(entityToAdd: JavaModule): List<ModuleDependencyItem> {
     val returnDependencies: MutableList<ModuleDependencyItem> = defaultDependencies.toMutableList()
-    entityToAdd.jvmJdkName?.also {
-      returnDependencies.add(SdkDependency(SdkId(it, "JavaSDK")))
+    entityToAdd.jvmJdkName?.also { jdkName ->
+      if (jdkName == defaultJdkName) {
+        returnDependencies.add(InheritedSdkDependency)
+      } else {
+        returnDependencies.add(SdkDependency(SdkId(jdkName, "JavaSDK")))
+      }
     }
     if (scalaSdkExtensionExists()) {
       entityToAdd.scalaAddendum?.also { addendum ->
@@ -141,6 +140,7 @@ class JavaModuleWithSourcesUpdater(
 class JavaModuleWithoutSourcesUpdater(
   private val workspaceModelEntityUpdaterConfig: WorkspaceModelEntityUpdaterConfig,
   private val libraries: Map<String, Library> = emptyMap(),
+  private val defaultJdkName: String? = null,
 ) : WorkspaceModelEntityWithoutParentModuleUpdater<JavaModule, ModuleEntity> {
   override suspend fun addEntity(entityToAdd: JavaModule): ModuleEntity {
     val moduleEntityUpdater =
@@ -151,8 +151,12 @@ class JavaModuleWithoutSourcesUpdater(
 
   private fun calculateJavaModuleDependencies(entityToAdd: JavaModule): List<ModuleDependencyItem> =
     entityToAdd.jvmJdkName
-      ?.let {
-        listOf(SdkDependency(SdkId(it, "JavaSDK")))
+      ?.let { jdkName ->
+        if (jdkName == defaultJdkName) {
+          listOf(InheritedSdkDependency)
+        } else {
+          listOf(SdkDependency(SdkId(jdkName, "JavaSDK")))
+        }
       } ?: listOf()
 }
 
@@ -161,7 +165,8 @@ class JavaModuleUpdater(
   projectBasePath: Path,
   moduleEntities: List<Module> = emptyList(),
   libraries: List<Library> = emptyList(),
-) : WorkspaceModelEntityWithoutParentModuleUpdater<JavaModule, ModuleEntity> {
+  defaultJdkName: String? = null,
+  ) : WorkspaceModelEntityWithoutParentModuleUpdater<JavaModule, ModuleEntity> {
   private val librariesByName = libraries.associateBy { it.displayName }
   private val javaModuleWithSourcesUpdater =
     JavaModuleWithSourcesUpdater(
@@ -169,9 +174,10 @@ class JavaModuleUpdater(
       projectBasePath,
       moduleEntities,
       librariesByName,
-    )
+      defaultJdkName,
+      )
   private val javaModuleWithoutSourcesUpdater =
-    JavaModuleWithoutSourcesUpdater(workspaceModelEntityUpdaterConfig, librariesByName)
+    JavaModuleWithoutSourcesUpdater(workspaceModelEntityUpdaterConfig, librariesByName, defaultJdkName)
 
   override suspend fun addEntity(entityToAdd: JavaModule): ModuleEntity? =
     if (entityToAdd.doesntContainSourcesAndResources() && entityToAdd.containsJavaKotlinLanguageIds()) {

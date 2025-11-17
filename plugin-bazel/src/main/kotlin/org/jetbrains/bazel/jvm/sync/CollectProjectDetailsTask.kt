@@ -46,7 +46,6 @@ import org.jetbrains.bazel.ui.console.withSubtask
 import org.jetbrains.bazel.ui.notifications.BazelBalloonNotifier
 import org.jetbrains.bazel.utils.SourceType
 import org.jetbrains.bazel.workspacemodel.entities.JavaModule
-import org.jetbrains.bazel.workspacemodel.entities.Module
 import org.jetbrains.bsp.protocol.BuildTarget
 import org.jetbrains.bsp.protocol.JoinedBuildServer
 import org.jetbrains.bsp.protocol.utils.extractJvmBuildTarget
@@ -61,7 +60,7 @@ class CollectProjectDetailsTask(
   private val diff: MutableEntityStorage,
   private val targetUtilsDiff: TargetUtilsProjectStructureDiff,
 ) {
-  private var uniqueJavaHomes: Set<Path>? = null
+  private var uniqueJavaHomes: List<Path>? = null
 
   private var javacOptions: Map<String, String>? = null
 
@@ -88,6 +87,8 @@ class CollectProjectDetailsTask(
         }
       }
       project.defaultJdkName = projectDetails.defaultJdkName
+      // Set the project SDK in IntelliJ's Project Structure to match the default JDK
+      SdkUtils.setProjectSdk(project, projectDetails.defaultJdkName)
     }
 
     if (scalaSdkExtensionExists()) {
@@ -153,11 +154,15 @@ class CollectProjectDetailsTask(
         }
     }
 
-  private fun calculateAllUniqueJavaHomes(projectDetails: ProjectDetails): Set<Path> =
+  private fun calculateAllUniqueJavaHomes(projectDetails: ProjectDetails): List<Path> =
     projectDetails.targets
       .mapNotNull(::extractJvmBuildTarget)
-      .map { requireNotNull(it.javaHome) { "javaHome is null but expected not to be null for $it" } }
-      .toSet()
+      .mapNotNull { it.javaHome }
+      .groupingBy { it }
+      .eachCount()
+      .toList()
+      .sortedByDescending { it.second }
+      .map { it.first }
 
   private suspend fun calculateAllScalaSdkInfosSubtask(projectDetails: ProjectDetails) =
     project.syncConsole.withSubtask(
@@ -265,7 +270,8 @@ class CollectProjectDetailsTask(
               projectBasePath = projectBasePath,
               project = project,
               importIjars = projectDetails.workspaceContext?.importIjars ?: false,
-            )
+              defaultJdkName = projectDetails.defaultJdkName,
+              )
 
           workspaceModelUpdater.load(modulesToLoad, libraries, libraryModules)
           compiledSourceCodeInsideJarToExclude?.let { workspaceModelUpdater.loadCompiledSourceCodeInsideJarExclude(it) }
