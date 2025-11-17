@@ -66,7 +66,7 @@ class CollectProjectDetailsTask(
   private val diff: MutableEntityStorage,
   private val targetUtilsDiff: TargetUtilsProjectStructureDiff,
 ) {
-  private var uniqueJavaHomes: Set<Path>? = null
+  private var uniqueJavaHomes: List<Path>? = null
 
   private lateinit var javacOptions: Map<String, String>
 
@@ -93,6 +93,8 @@ class CollectProjectDetailsTask(
         }
       }
       project.defaultJdkName = projectDetails.defaultJdkName
+      // Set the project SDK in IntelliJ's Project Structure to match the default JDK
+      SdkUtils.setProjectSdk(project, projectDetails.defaultJdkName)
     }
 
     if (scalaSdkExtensionExists()) {
@@ -158,11 +160,15 @@ class CollectProjectDetailsTask(
         }
     }
 
-  private fun calculateAllUniqueJavaHomes(projectDetails: ProjectDetails): Set<Path> =
+  private fun calculateAllUniqueJavaHomes(projectDetails: ProjectDetails): List<Path> =
     projectDetails.targets
       .mapNotNull(::extractJvmBuildTarget)
-      .map { requireNotNull(it.javaHome) { "javaHome is null but expected not to be null for $it" } }
-      .toSet()
+      .mapNotNull { it.javaHome }
+      .groupingBy { it }
+      .eachCount()
+      .toList()
+      .sortedByDescending { it.second }
+      .map { it.first }
 
   private suspend fun calculateAllScalaSdkInfosSubtask(projectDetails: ProjectDetails) =
     project.syncConsole.withSubtask(
@@ -272,6 +278,7 @@ class CollectProjectDetailsTask(
               project = project,
               isAndroidSupportEnabled = false,
               importIjars = projectDetails.workspaceContext?.importIjarsSpec?.value ?: false,
+              defaultJdkName = projectDetails.defaultJdkName,
             )
 
           workspaceModelUpdater.load(modulesToLoad, libraries, libraryModules)
