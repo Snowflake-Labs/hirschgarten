@@ -19,6 +19,7 @@ import org.jetbrains.bazel.magicmetamodel.impl.workspacemodel.impl.updaters.tran
 import org.jetbrains.bazel.scala.sdk.scalaSdkExtensionExists
 import org.jetbrains.bazel.workspacemodel.entities.JavaModule
 import org.jetbrains.bazel.workspacemodel.entities.Library
+import org.jetbrains.bazel.workspacemodel.entities.Module
 import java.nio.file.Path
 
 class JavaModuleWithSourcesUpdater(

@@ -43,59 +43,59 @@ class JvmTestHandler(configuration: BazelRunConfiguration) : BazelRunHandler {
       environment.putCopyableUserData(SCRIPT_PATH_KEY, Ref())
       environment.putCopyableUserData(COROUTINE_JVM_FLAGS_KEY, Ref())
       return ScriptPathTestCommandLineState(environment, state)
-    } else {
-      val configuration = environment.runProfile as BazelRunConfiguration
-      if (configuration.targets.size == 1) {
-        val paramsToAdd: MutableList<String> = mutableListOf()
-        if (state.additionalBazelParams?.contains("--test_output") != true) {
-          paramsToAdd.add("--test_output=streamed")
-        }
-        if (state.additionalBazelParams?.contains("--strategy") != true) {
-          paramsToAdd.add("--strategy=TestRunner=standalone")
-        }
-        if (state.additionalBazelParams?.contains("--cache_test_results") != true) {
-          paramsToAdd.add("--cache_test_results=no")
-        }
-        state.additionalBazelParams = (state.additionalBazelParams ?: "") + paramsToAdd.joinToString(" ")
-        BazelTestCommandLineState(environment, state)
     }
+    val configuration = environment.runProfile as BazelRunConfiguration
+    if (configuration.targets.size == 1) {
+      val paramsToAdd: MutableList<String> = mutableListOf()
+      if (state.additionalBazelParams?.contains("--test_output") != true) {
+        paramsToAdd.add("--test_output=streamed")
+      }
+      if (state.additionalBazelParams?.contains("--strategy") != true) {
+        paramsToAdd.add("--strategy=TestRunner=standalone")
+      }
+      if (state.additionalBazelParams?.contains("--cache_test_results") != true) {
+        paramsToAdd.add("--cache_test_results=no")
+      }
+      state.additionalBazelParams = (state.additionalBazelParams ?: "") + paramsToAdd.joinToString(" ")
+    }
+    return BazelTestCommandLineState(environment, state)
   }
 
-  class JvmTestHandlerProvider : GooglePluginAwareRunHandlerProvider {
-    override val id: String
-      get() = "JvmTestHandlerProvider"
+    class JvmTestHandlerProvider : GooglePluginAwareRunHandlerProvider {
+      override val id: String
+        get() = "JvmTestHandlerProvider"
 
-    override fun createRunHandler(configuration: BazelRunConfiguration): BazelRunHandler = JvmTestHandler(configuration)
+      override fun createRunHandler(configuration: BazelRunConfiguration): BazelRunHandler = JvmTestHandler(configuration)
 
-    override fun canRun(targetInfos: List<BuildTarget>): Boolean =
-      targetInfos.all {
-        (it.kind.isJvmTarget() && it.kind.ruleType == RuleType.TEST)
+      override fun canRun(targetInfos: List<BuildTarget>): Boolean =
+        targetInfos.all {
+          (it.kind.isJvmTarget() && it.kind.ruleType == RuleType.TEST)
+        }
+
+      override fun canDebug(targetInfos: List<BuildTarget>): Boolean = targetInfos.size == 1 && canRun(targetInfos)
+
+      override val googleHandlerId: String = "BlazeJavaRunConfigurationHandlerProvider"
+      override val isTestHandler: Boolean = true
+    }
+
+  class ScriptPathTestCommandLineState(environment: ExecutionEnvironment, val settings: JvmTestState) :
+    JvmDebuggableCommandLineState(environment, settings.debugPort) {
+    override fun createAndAddTaskListener(handler: BazelProcessHandler): BazelTaskListener =
+      if (environment.project.useJetBrainsTestRunner()) {
+        JetBrainsTestRunnerTaskListener(handler)
+      } else {
+        BazelTestTaskListener(handler)
       }
 
-    override fun canDebug(targetInfos: List<BuildTarget>): Boolean = targetInfos.size == 1 && canRun(targetInfos)
+    override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult = executeWithTestConsole(executor)
 
-    override val googleHandlerId: String = "BlazeJavaRunConfigurationHandlerProvider"
-    override val isTestHandler: Boolean = true
-  }
-}
-
-class ScriptPathTestCommandLineState(environment: ExecutionEnvironment, val settings: JvmTestState) :
-  JvmDebuggableCommandLineState(environment, settings.debugPort) {
-  override fun createAndAddTaskListener(handler: BazelProcessHandler): BazelTaskListener =
-    if (environment.project.useJetBrainsTestRunner()) {
-      JetBrainsTestRunnerTaskListener(handler)
-    } else {
-      BazelTestTaskListener(handler)
+    override suspend fun startBsp(
+      server: JoinedBuildServer,
+      pidDeferred: CompletableDeferred<Long?>,
+      handler: BazelProcessHandler,
+    ) {
+      val scriptPath = checkNotNull(environment.getCopyableUserData(SCRIPT_PATH_KEY)?.get()) { "Missing --script_path" }
+      runWithScriptPath(scriptPath, environment.project, originId, pidDeferred, handler, settings.env.envs)
     }
-
-  override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult = executeWithTestConsole(executor)
-
-  override suspend fun startBsp(
-    server: JoinedBuildServer,
-    pidDeferred: CompletableDeferred<Long?>,
-    handler: BazelProcessHandler,
-  ) {
-    val scriptPath = checkNotNull(environment.getCopyableUserData(SCRIPT_PATH_KEY)?.get()) { "Missing --script_path" }
-    runWithScriptPath(scriptPath, environment.project, originId, pidDeferred, handler, settings.env.envs)
   }
 }

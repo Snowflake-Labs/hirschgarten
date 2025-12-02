@@ -46,6 +46,7 @@ import org.jetbrains.bazel.ui.console.withSubtask
 import org.jetbrains.bazel.ui.notifications.BazelBalloonNotifier
 import org.jetbrains.bazel.utils.SourceType
 import org.jetbrains.bazel.workspacemodel.entities.JavaModule
+import org.jetbrains.bazel.workspacemodel.entities.Module
 import org.jetbrains.bsp.protocol.BuildTarget
 import org.jetbrains.bsp.protocol.JoinedBuildServer
 import org.jetbrains.bsp.protocol.utils.extractJvmBuildTarget
