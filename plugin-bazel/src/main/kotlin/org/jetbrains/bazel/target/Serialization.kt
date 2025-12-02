@@ -7,7 +7,6 @@ import org.h2.mvstore.WriteBuffer
 import org.jetbrains.bazel.commons.LanguageClass
 import org.jetbrains.bazel.commons.RuleType
 import org.jetbrains.bazel.commons.TargetKind
-import org.jetbrains.bazel.commons.gson.bazelGson
 import org.jetbrains.bazel.label.AllPackagesBeneath
 import org.jetbrains.bazel.label.AllRuleTargets
 import org.jetbrains.bazel.label.AllRuleTargetsAndFiles
@@ -135,9 +134,8 @@ internal fun createIdToBuildMapType(filePathSuffix: String, rootDir: Path): MVMa
         } else {
           val aClass = targetData.javaClass
           BuildDataTargetTypeRegistry.writeClassId(aClass, buffer)
-          val data = bazelGson.toJson(targetData, aClass).encodeToByteArray()
-          buffer.putVarInt(data.size)
-          buffer.put(data)
+          // Use optimized binary serialization instead of JSON
+          BinaryBuildTargetDataSerializer.serialize(targetData, buffer, rootDir, filePathSuffix)
         }
       },
       reader = { buffer ->
@@ -153,11 +151,8 @@ internal fun createIdToBuildMapType(filePathSuffix: String, rootDir: Path): MVMa
           if (typeId == 0) {
             null
           } else {
-            val aClass = BuildDataTargetTypeRegistry.getClass(typeId)
-            val dataSize = readVarInt(buffer)
-            val encodedData = ByteArray(dataSize)
-            buffer.get(encodedData)
-            bazelGson.fromJson(encodedData.decodeToString(), aClass)
+            // Use optimized binary deserialization instead of JSON
+            BinaryBuildTargetDataSerializer.deserialize(typeId, buffer, rootDir)
           }
         PartialBuildTarget(id = id, tags = tags, kind = kind, baseDirectory = baseDirectory, data = data, noBuild = noBuild)
       },
@@ -166,11 +161,11 @@ internal fun createIdToBuildMapType(filePathSuffix: String, rootDir: Path): MVMa
   return mapBuilder
 }
 
-private const val RELATIVE_PATH = 1.toByte()
-private const val ROOT_PATH = 2.toByte()
-private const val ABSOLUTE_PATH = 0.toByte()
+internal const val RELATIVE_PATH = 1.toByte()
+internal const val ROOT_PATH = 2.toByte()
+internal const val ABSOLUTE_PATH = 0.toByte()
 
-private fun writePath(
+internal fun writePath(
   path: String,
   filePathSuffix: String,
   buffer: WriteBuffer,
@@ -186,7 +181,7 @@ private fun writePath(
   }
 }
 
-private fun readPath(buffer: ByteBuffer, rootDir: Path): Path =
+internal fun readPath(buffer: ByteBuffer, rootDir: Path): Path =
   when (val pathKind = buffer.get()) {
     RELATIVE_PATH -> rootDir.resolve(buffer.readString())
     ROOT_PATH -> rootDir
