@@ -128,7 +128,12 @@ internal class AspectBazelProjectMapper(
             .filterNot { it.tagsList.contains("shard") }
             .partition { isWorkspaceTarget(it, repoMapping, featureFlags, workspaceContext) }
         val (jvmDirectDependencies, nonJvmDirectDependencies) = targetsAtDepth.directDependencies.partition { it.getJvmTarget() }
-        val jvmLibraries = (nonWorkspaceTargets + jvmDirectDependencies).associateBy { it.label() }
+        val jvmLibraries =
+          closeOverExportedDependencies(
+            seed = nonWorkspaceTargets + jvmDirectDependencies,
+            allTargets = allTargets,
+            moduleLabels = targetsToImport.mapTo(mutableSetOf()) { it.label() },
+          )
         (targetsToImport + nonJvmDirectDependencies).asSequence() to jvmLibraries
       }
     val interfacesAndBinariesFromTargetsToImport =
@@ -636,6 +641,41 @@ internal class AspectBazelProjectMapper(
           generatorName = targetInfo.generatorName.takeIf { it.isNotEmpty() },
         )
       }
+  }
+
+  /**
+   * Returns [seed] plus every JVM target reachable from it through `exports` edges.
+   *
+   * LibraryGraph.createLibraryModules turns each entry of a library's `dependencies` into a module
+   * dependency that resolves only if that label is itself a library; an unmatched label yields a
+   * dependency on a module that was never created, which the workspace model drops without
+   * reporting. The depth-limited frontier only yields libraries one hop out, so a jar reached
+   * *through* another library — an `exports`-only `java_library` wrapping a maven jar, say — used to
+   * be referenced and never defined, and its classes silently left the classpath.
+   *
+   * Only `exports` is followed, since that is what a consumer of the library has to see in order to
+   * compile. A library's plain `deps` and `runtime_deps` are not part of its API, and skipping them
+   * keeps this from expanding into the full transitive closure.
+   */
+  private fun closeOverExportedDependencies(
+    seed: List<TargetInfo>,
+    allTargets: Map<Label, TargetInfo>,
+    moduleLabels: Set<Label>,
+  ): Map<Label, TargetInfo> {
+    val libraries = seed.associateByTo(mutableMapOf()) { it.label() }
+    val toVisit = ArrayDeque(libraries.keys)
+    while (toVisit.isNotEmpty()) {
+      val current = libraries.getValue(toVisit.removeFirst())
+      for (dependency in current.depsList) {
+        if (!dependency.exported) continue
+        val label = Label.parse(dependency.target.label)
+        if (label in libraries || label in moduleLabels) continue
+        val exported = allTargets[label]?.takeIf { it.getJvmTarget() } ?: continue
+        libraries[label] = exported
+        toVisit.add(label)
+      }
+    }
+    return libraries
   }
 
   private suspend fun createLibraries(
