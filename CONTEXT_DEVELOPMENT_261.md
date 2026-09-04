@@ -8,48 +8,100 @@
 > merges. Don't write "get PR reviewed/merged" — this doc lives in the repo and is read post-merge,
 > so those entries are immediately stale. Use `—` or omit the field when nothing remains.
 
-## Current State (as of 2026-08-25)
+## Current State (as of 2026-09-04)
 
 ### Working Branch
-`feat/partial-sync-button-fix` (new branch needed) — or add to `feat/file-event-batch-guard`
+`development-261` — no Snowflake feature work in flight. Tip: `cfd0e0f23a`.
 
-### Recently Completed Work (PR #33)
+### Recently Completed Work
 
-**Branch**: `fix/jvm-wrapper-project-sdk` → merged into `development-261`
+All four items previously listed as pending have merged into `development-261`.
 
-**Problem**: PR #31 introduced two regressions with `jvm_wrapper_runtime` JDK resolution:
-1. Project SDK reported as "not configured" — `defaultJdkName` derived from raw wrapper path but SDK registered under resolved path.
-2. Target modules showed red code — `ModuleDetailsToJavaModuleTransformer` looked up the raw-path SDK name which no longer existed.
+**PR #37 — project SDK ordering race and symlink resolution** (merged 2026-09-02)
 
-**Fix**: `SdkUtils.resolveJavaHome()` widened to `internal`; `defaultJdkName` derived from resolved path; alias SDK registered under original wrapper-path name.
+1. `setProjectSdk()` ran in `execute()` *before* `addBspFetchedJdks()` registered the SDK in the JDK
+   table, so `findJdk()` returned null and the project SDK was never set; `cleanUpInvalidJdks()` then
+   removed the old one, leaving "No SDK". Moved to `postprocessingSubtask()`. The `defaultJdkName`
+   overwrite is now guarded to full sync only, since partial sync sees a subset of targets.
+2. `resolveJavaHome()` now tries `toRealPath()` before falling through to wrapper resolution.
+   `ide_java_home_override` paths that are symlinks (e.g. `/nix/var/nix/profiles/default`) failed
+   `isValidSdkHome()` because `normalize()` doesn't resolve symlinks, and the fallback then scanned
+   the Bazel execroot and picked the wrong JDK.
+
+**PR #36 — partial sync destroying the target cache** (merged 2026-08-26)
+
+1. `TargetPersistenceLayerSyncHook` routes `PartialProjectSync` through a new `mergePartial()` path
+   that updates the target cache additively, instead of `saveAll()` → `TargetsCacheStorage.reset()`,
+   which wiped every target in the project and repopulated with only the partial-sync scope.
+   Root cause: 251's `TargetUtilsSyncHook` called `getOrFetchResolvedWorkspace()` with the default
+   `SecondPhaseSync` scope; the upstream `TargetPersistenceLayerSyncHook` that replaced it in 261
+   uses `environment.workspace` blindly.
+2. `TargetsCacheStorage.addTargets()` now uses `xxh3_64`, matching `reset()` and `addFileToTarget()`.
+   The `xxh3_128` mismatch meant `getTargetsForPath()` could never resolve labels added via
+   `addTargets()`, breaking gutter icons and file→target lookups after partial sync.
+3. `BazelFileEventListener` forces a Bazel query for `ExternalCreate` events (files submitted by
+   external plugins such as Snowjet) even when the file appears to sit in an existing module's source
+   root. This is a workaround for the resource-root bug below, not a fix for it.
+
+**PR #35 — file event batch guard** (merged 2026-08-18)
+
+A `git pull` can deliver dozens of `Create`/`ExternalCreate` events at once, triggering an expensive
+inverse-sources query that chokes IntelliJ. New-file events are counted with a short-circuiting
+sequence (`asSequence().filter().drop(5).any()`); over the limit, processing is skipped and the
+Resync notification is shown. `NEW_FILE_EVENTS_LIMIT = 5`, declared next to `PROCESSING_DELAY`.
+The check now lives in `processEventsForProject`, not `addNewFilesToBothModels` as the PR body says.
+
+**PR #34 — shard module elimination** (merged 2026-08-20)
+
+`java_incremental_library` splits a target into one umbrella plus N shard sub-targets; importing
+shards as separate IntelliJ modules caused red code and bloated the module list. Shard-tagged targets
+are filtered before the workspace/non-workspace partition, shard deps are dropped from umbrella
+dependency lists, `resolveShardFolkDependencies` was removed, and `UnsyncedTargetUpdater` skips
+shard-tagged targets the same way it skips `no-ide`.
+
+**Next step**: —
 
 ### Pending / In-Progress Work
 
-**File event batch guard** — branch `feat/file-event-batch-guard`, PR open (→ `development-261`).
+**Overly broad resource roots** — open, root cause not investigated.
 
-**Problem**: A `git pull` can deliver dozens of `Create`/`ExternalCreate` events simultaneously, triggering an expensive Bazel inverse-sources query that chokes IntelliJ.
+During full sync, targets with a `resources = [...]` attribute get resource roots that are far too
+broad: `GlobalServices/src/test/java` ends up registered as a Resources folder for a single target's
+module, so `getModulesForFile()` returns that module for *any* file under the whole tree. The
+downstream effect is `bazelQueryIsRequired = false` for new files in those directories — the file
+looks like it belongs to a module that doesn't own it. PR #36 item 3 works around the symptom for
+`ExternalCreate` events only. Suspect the resource-directory computation in the JVM sync path picks a
+parent directory instead of the specific resource path.
 
-**Fix** (`BazelFileEventListener.kt`): `addNewFilesToBothModels` counts new-file events with an early-exit sequence (`asSequence().filter().drop(5).any()`); if exceeded, skip processing and show the Resync notification instead. Limit is `NEW_FILE_EVENTS_LIMIT = 5`.
+**PR #39 — sync metrics topics** (open, authored by `sfc-gh-daiwang`)
 
-**Shard module elimination** — branch `feat/shard-module-elimination`, PR #34 open (→ `development-261`).
+Adds `PartialSyncResultListener` and `FullSyncResultListener` message-bus topics for Snowjet to
+record sync metrics. Review posted 2026-09-04 (`#issuecomment-5545927174`) with a task list. The two
+structural asks, both about fork cost: 141 of 242 added lines land in upstream-maintained files, and
+~63 of those are new declarations (`PartialSyncMetricsHolder`, `publishPartialSyncResult`,
+`SimplifiedFileEvent.toOpName()`) appended to `BazelFileEventListener.kt` that could live in a
+Snowflake-owned file in the same package; a further ~20 come from re-indenting `applyAllChanges`'s
+whole body instead of wrapping its single call site in `processEventQueue`. Correctness asks: the
+publish in `ProjectSyncTask`'s `finally` precedes `SyncStatusService.finishSync()`, so a throwing
+subscriber can leave `_isSyncInProgress` stuck true for the session; and `AddFileToModuleAction`
+reports `query_found_synced` for failed queries and for files with no owning target.
 
-**Problem**: `java_incremental_library` splits a target into one umbrella + N shard sub-targets. Importing shards as separate IntelliJ modules caused red code and bloated the module list.
+### Decisions / Closed Without Merging
 
-**Fix** (`AspectBazelProjectMapper.kt`, `UnsyncedTargetUpdater.kt`): Shard-tagged targets filtered before partition into workspace/non-workspace; shard deps dropped from umbrella dependency lists; `resolveShardFolkDependencies` removed; `UnsyncedTargetUpdater` skips shard-tagged targets like `no-ide`.
+**PR #38 — libraries reachable only through exported deps** (closed 2026-09-03, not merged).
 
-**Partial sync button fix** — unmerged, needs PR (→ `development-261`).
+Unresolved imports from exports-only `java_library` shims (e.g. `spring-beans` reached through
+`//GlobalServices:spring-beans`) are fixed by setting `import_depth: 1` in the project view, not by
+changing the mapper. `AspectBazelProjectMapper.createProject` builds its library set from the
+depth-limited frontier while `createLibrary` copies the target's full `depsList` into
+`Library.dependencies`, so at `import_depth: 0` the shim is the frontier library and the maven jar it
+`exports` is referenced but never defined. `LibraryGraph.toDependencyId` then emits an unprefixed
+module name and the workspace model drops the unmatched dependency with no log line.
 
-**Problem**: `TargetPersistenceLayerSyncHook.onSync()` uses `environment.workspace.targets` (partial sync scope = only that target + deps) and calls `saveAll()` → `TargetsCacheStorage.reset()`, which **wipes the entire target cache** for the whole project, then repopulates with only partial sync targets. This destroys all file→target and module→target mappings for everything else in the project.
-
-Root cause: in 251 (development branch), `TargetUtilsSyncHook` called `getOrFetchResolvedWorkspace()` with default `SecondPhaseSync` scope (always the full workspace). In 261, that hook was replaced by the upstream `TargetPersistenceLayerSyncHook` which blindly uses `environment.workspace`.
-
-**Fix** (4 files):
-1. `BazelTargetPersistenceLayer` — add `mergePartial()` with default fallback to `saveAll()`
-2. `TargetPersistenceLayerSyncHook` — call `mergePartial()` for `PartialProjectSync` instead of `saveAll()`
-3. `TargetUtils` — add `mergePartialTargets()` that calls `db.addTargets()` + `db.addFileToTarget()` additively (no `reset()`)
-4. `TargetUtilsTargetPersistanceLayer` — override `mergePartial()` to call `mergePartialTargets()`
-
-**Next step**: —
+Two notes if this resurfaces: the bug class is displaced rather than eliminated — whatever sits at
+the new frontier has deps one hop past it that dangle identically, and `java_incremental_library`
+generates a `<name>.deps` exports-only shim per target. And a warning when a `LibraryItem.dependencies`
+entry matches neither a library nor a module would make the next occurrence visible instead of silent.
 
 ### Repo Context
 - This is a Snowflake fork of the JetBrains Bazel IntelliJ plugin (`hirschgarten`)
@@ -58,3 +110,27 @@ Root cause: in 251 (development branch), `TargetUtilsSyncHook` called `getOrFetc
 - PRs are filed against `development-261` (not `main`)
 - Git remote for pushing PRs: `snowflake` (points to `github.com/Snowflake-Labs/hirschgarten`)
 - Use your own `sfc-gh-*` GitHub account when creating PRs
+
+### Fork Topology (check before editing)
+
+Rebase cost is not uniform across files, and upstream has restructured its module layout — files this
+fork keeps under `plugin-bazel/src/main/kotlin/…` often live upstream under `intellij.bazel.core/src/…`
+or `intellij.bazel.backend/src/…`, so a rebase involves a rename on top of the content drift. Check
+before deciding how invasive an edit can be:
+
+```bash
+git ls-tree -r --name-only jetbrains/main | grep '/<FileName>.kt$'   # empty ⇒ Snowflake-only
+git log --oneline --since=<date> jetbrains/main -- <upstream/path>   # churn
+```
+
+Verified as of `jetbrains/main` @ `1e418e3c76` (2026-08-20):
+
+| File | Upstream path | Churn since 2025-06 |
+|---|---|---|
+| `BazelFileEventListener.kt` | `intellij.bazel.core/src/…` | 12 commits — hottest file we edit |
+| `ProjectSyncTask.kt` | `intellij.bazel.backend/src/…` | 1 commit |
+| `SimplifiedFileEvent.kt`, `SyncStatusService.kt` | exist upstream | — |
+| `AddFileToModuleAction.kt`, `ModuleAssignmentUtils.kt`, `UnsyncedTargetUpdater.kt` | **Snowflake-only** | edit freely |
+
+Prefer new Snowflake-owned files in the same package over appending declarations to upstream files,
+and prefer wrapping a call site over re-indenting an upstream function body.
