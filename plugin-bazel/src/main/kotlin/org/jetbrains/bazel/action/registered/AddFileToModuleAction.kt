@@ -21,6 +21,8 @@ import org.jetbrains.bazel.target.targetUtils
 import org.jetbrains.bazel.utils.isSourceFile
 import org.jetbrains.bazel.workspace.addToModule
 import org.jetbrains.bazel.workspace.askForInverseSources
+import org.jetbrains.bazel.workspace.fileEvents.PartialSyncMetricsHolder
+import org.jetbrains.bazel.workspace.fileEvents.withPartialSyncMetrics
 import org.jetbrains.bazel.workspace.getModulesForFile
 import org.jetbrains.bazel.workspace.processTargetsForTestlibStripping
 import org.jetbrains.bazel.workspace.resolvePackagePrefix
@@ -32,7 +34,17 @@ class AddFileToModuleAction :
 
   override suspend fun actionPerformed(project: Project, e: AnActionEvent) {
     val virtualFile = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
+    val metrics = PartialSyncMetricsHolder()
+    withPartialSyncMetrics(project, metrics, trigger = "manual") {
+      doAddFileToModule(project, virtualFile, metrics)
+    }
+  }
 
+  private suspend fun doAddFileToModule(
+    project: Project,
+    virtualFile: com.intellij.openapi.vfs.VirtualFile,
+    metrics: PartialSyncMetricsHolder,
+  ) {
     val workspaceModel = project.serviceAsync<WorkspaceModel>()
     val entityStorageDiff = MutableEntityStorage.from(workspaceModel.currentSnapshot)
 
@@ -47,6 +59,7 @@ class AddFileToModuleAction :
         val path = url.toPath()
 
         // Query Bazel for targets that should contain this file
+        val queryStartNanos = System.nanoTime()
         val targets = reporter.nextStep(
           endFraction = 80,
           text = BazelPluginBundle.message("file.change.processing.step.query"),
@@ -54,14 +67,32 @@ class AddFileToModuleAction :
           try {
             askForInverseSources(project, url).targets.values.flatten()
           } catch (ex: Exception) {
+            metrics.outcome = PartialSyncMetricsHolder.OUTCOME_QUERY_UNAVAILABLE
             emptyList()
           }
+        }
+        metrics.targetQueryMs = (System.nanoTime() - queryStartNanos) / 1_000_000
+
+        if (targets.isEmpty() && metrics.outcome == PartialSyncMetricsHolder.OUTCOME_UNKNOWN) {
+          metrics.outcome = PartialSyncMetricsHolder.OUTCOME_QUERY_NO_TARGET
         }
 
         if (targets.isNotEmpty()) {
           val processedResult = processTargetsForTestlibStripping(targets)
+          var hadAspectBuild = false
+          var aspectFetchMs = 0L
           val modulesWithTestFlag = processedResult.allProcessedTargets.mapNotNull {
-            it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project)
+            var ranAspect = false
+            val start = System.nanoTime()
+            val result = it.toModuleEntity(workspaceModel.currentSnapshot, entityStorageDiff, project) { ranAspect = true }
+            if (ranAspect) { hadAspectBuild = true; aspectFetchMs += (System.nanoTime() - start) / 1_000_000 }
+            result
+          }
+          if (hadAspectBuild) metrics.unsyncedTargetFetchMs = aspectFetchMs
+          metrics.outcome = if (hadAspectBuild) {
+            PartialSyncMetricsHolder.OUTCOME_QUERY_RAN_ASPECT
+          } else {
+            PartialSyncMetricsHolder.OUTCOME_QUERY_FOUND_SYNCED
           }
 
           val moduleNameToLabel = processedResult.allProcessedTargets.associateBy { it.formatAsModuleName(project) }
