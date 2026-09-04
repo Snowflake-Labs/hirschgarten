@@ -11,7 +11,7 @@
 ## Current State (as of 2026-09-04)
 
 ### Working Branch
-`development-261` — no Snowflake feature work in flight. Tip: `cfd0e0f23a`.
+`development-261` — no Snowflake feature work in flight. Tip: `56d3a84cad`.
 
 ### Recently Completed Work
 
@@ -76,15 +76,31 @@ parent directory instead of the specific resource path.
 **PR #39 — sync metrics topics** (open, authored by `sfc-gh-daiwang`)
 
 Adds `PartialSyncResultListener` and `FullSyncResultListener` message-bus topics for Snowjet to
-record sync metrics. Review posted 2026-09-04 (`#issuecomment-5545927174`) with a task list. The two
-structural asks, both about fork cost: 141 of 242 added lines land in upstream-maintained files, and
-~63 of those are new declarations (`PartialSyncMetricsHolder`, `publishPartialSyncResult`,
-`SimplifiedFileEvent.toOpName()`) appended to `BazelFileEventListener.kt` that could live in a
-Snowflake-owned file in the same package; a further ~20 come from re-indenting `applyAllChanges`'s
-whole body instead of wrapping its single call site in `processEventQueue`. Correctness asks: the
-publish in `ProjectSyncTask`'s `finally` precedes `SyncStatusService.finishSync()`, so a throwing
-subscriber can leave `_isSyncInProgress` stuck true for the session; and `AddFileToModuleAction`
-reports `query_found_synced` for failed queries and for files with no owning target.
+record sync metrics. Review posted 2026-09-04 (`#issuecomment-5545927174`); the author revised in
+`3b4939b473` the same day and took most of it.
+
+The revision cut the upstream-file delta from +141/−19 to **+37/−5**: the metrics helpers moved to a
+new Snowflake-owned `PartialSyncMetrics.kt` in the same package, and `processEventQueue` now wraps the
+single call site so `applyAllChanges` keeps its body. `AddFileToModuleAction.kt` grew instead
+(+75/−22), which is the right place for it to grow. Correctness fixes landed too: publish moved after
+`SyncStatusService.finishSync()` and wrapped in `runCatching`; the manual path now distinguishes
+`query_unavailable` / `query_no_target` / `query_ran_aspect` / `query_found_synced` instead of
+reporting success for all four; the racy `isSyncInProgress` re-read is gone, replaced by collapsing
+`query_failed` and `query_sync_running` into one `query_unavailable` value; default outcome is now
+`"unknown"`.
+
+Outstanding at time of writing: the `runCatching` wrappers have no `onFailure`, so a subscriber that
+always throws yields zero metrics and zero log output (`getOrLogException` is the platform idiom);
+there is no `OUTCOME_CANCELLED`, so routine cancellations land in the `"unknown"` bucket and destroy
+its value as a "a code path forgot to set this" signal; two likely ktlint failures (import ordering in
+`ProjectSyncTask.kt`, `argument-list-wrapping` in `BazelFileEventListener.kt`); and the
+`PartialSyncResultListener` KDoc still justifies string-typed fields by "not changing publish() call
+sites in upstream files", which the refactor made untrue. Still no tests, no schema version, and no
+correlation id linking a partial-sync batch to the full sync that follows it.
+
+Note for anyone aggregating this data: `PartialSyncResult` is published per *batch*, not per user
+action — `processEventQueue` runs in a `do/while` over `FileEventQueueController` batches with a fresh
+holder each time, and events from separate `processEventsForProject` calls can share a batch.
 
 ### Decisions / Closed Without Merging
 
