@@ -114,6 +114,13 @@ class BazelFileEventListener : BulkFileListenerBackgroundable {
       .any()
     if (tooManyNewFileEvents) {
       BazelProjectAware.notify(project)
+      runCatching {
+        publishPartialSyncResult(
+          project,
+          PartialSyncMetricsHolder().apply { outcome = PartialSyncMetricsHolder.OUTCOME_TOO_MANY_EVENTS },
+          allFileEvents = applicableEvents,
+        )
+      }
       return false
     }
     val queueController = FileEventQueueController.getInstance(project)
@@ -174,10 +181,10 @@ class BazelFileEventListener : BulkFileListenerBackgroundable {
   private suspend fun processEventQueue(project: Project, events: List<SimplifiedFileEvent>, taskId: TaskId) {
     val progressTitle = getProgressTitle(events)
     BazelFileEventProgressReporter.runWithProgressBar(progressTitle, project) { bazelReporter ->
-      applyAllChanges(
-        allFileEvents = events,
-        context = prepareProcessingContext(project, taskId, bazelReporter)
-      )
+      val context = prepareProcessingContext(project, taskId, bazelReporter)
+      withPartialSyncMetrics(project, context.metricsHolder, allFileEvents = events) {
+        applyAllChanges(allFileEvents = events, context = context)
+      }
     }
   }
 
@@ -192,6 +199,7 @@ class BazelFileEventListener : BulkFileListenerBackgroundable {
       }
     val fileEventsToProcess = allFileEvents.filter { !it.moveEventTargetFolderIsInAnyModule(existingModulesByEvent) }
     if (fileEventsToProcess.isEmpty()) {
+      context.metricsHolder.outcome = PartialSyncMetricsHolder.OUTCOME_NO_OP
       return
     }
 
@@ -299,14 +307,24 @@ class BazelFileEventListener : BulkFileListenerBackgroundable {
     // avoid running a Bazel query when not required (BAZEL-2458)
     if (bazelQueryIsRequired) {
       if (context.project.bazelProjectSettings.allowBazelInvocationOnFileEvents) {
+        val queryStartNanos = System.nanoTime()
         val targetsByPath =
-          context.progressReporter.startQueryStep { queryTargetsForFile(context.project, addedFilePaths, context.taskId) } ?: return
+          context.progressReporter.startQueryStep { queryTargetsForFile(context.project, addedFilePaths, context.taskId) }
+        if (targetsByPath == null) {
+          context.metricsHolder.outcome = PartialSyncMetricsHolder.OUTCOME_QUERY_UNAVAILABLE
+          return
+        }
+        context.metricsHolder.targetQueryMs = (System.nanoTime() - queryStartNanos) / 1_000_000
+        context.metricsHolder.hasFilesNoTarget = targetsByPath.any { (_, labels) -> labels.isEmpty() }
         addFileToTargets(targetsByPath, modulesToRemoveFilesFrom, modulesAlreadyContainingFiles, context)
+        context.metricsHolder.resolveQuerySuccessOutcome()
       } else {
+        context.metricsHolder.outcome = PartialSyncMetricsHolder.OUTCOME_QUERY_DISALLOWED
         // Bazel is not allowed to be run on file events, but it was necessary - show "Resync" button
         BazelProjectAware.notify(context.project)
       }
     } else {
+      context.metricsHolder.outcome = PartialSyncMetricsHolder.OUTCOME_NO_QUERY_NEEDED
       context.progressReporter.skipQueryStep()
       for (filePath in addedFilePaths) {
         val modules = modulesAlreadyContainingFiles[filePath] ?: continue
@@ -349,10 +367,16 @@ class BazelFileEventListener : BulkFileListenerBackgroundable {
         }
     }.distinct()
 
+    context.metricsHolder.hasUnsyncedTargets = unsyncedLabels.isNotEmpty()
+
     // Phase 2: Single batch RPC for all unsynced targets (filters no-ide server-side)
+    val fetchStartNanos = if (unsyncedLabels.isNotEmpty()) System.nanoTime() else null
     val fetchedTargets = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTargets(
       unsyncedLabels, context.project, context.workspaceSnapshot, context.entityStorageDiff
     )
+    fetchStartNanos?.let {
+      context.metricsHolder.unsyncedTargetFetchMs = (System.nanoTime() - it) / 1_000_000
+    }
 
     // Create module entities for successfully fetched targets
     for ((label, targetAndDeps) in fetchedTargets) {
@@ -480,10 +504,13 @@ class BazelFileEventListener : BulkFileListenerBackgroundable {
                 BazelPluginBundle.message("file.change.processing.title.multiple"),
                 project,
               ) { bazelReporter ->
-                listener.applyAllChanges(
-                  allFileEvents = batch,
-                  context = prepareProcessingContext(project, taskId, bazelReporter),
-                )
+                val context = prepareProcessingContext(project, taskId, bazelReporter)
+                withPartialSyncMetrics(project, context.metricsHolder, allFileEvents = batch) {
+                  listener.applyAllChanges(
+                    allFileEvents = batch,
+                    context = context,
+                  )
+                }
               }
             }
           } while (processed)
@@ -593,4 +620,5 @@ private data class ProcessingContext(
   val taskId: TaskId,
   val fileIndex: ProjectFileIndex,
   val progressReporter: BazelFileEventProgressReporter,
+  val metricsHolder: PartialSyncMetricsHolder = PartialSyncMetricsHolder(),
 )
