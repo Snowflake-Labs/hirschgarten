@@ -125,7 +125,7 @@ public suspend fun askForInverseSources(project: Project, fileUrl: VirtualFileUr
  * Converts a Label to a ModuleEntity, creating it via partial sync ([UnsyncedTargetUpdater]) if it doesn't exist.
  * Returns the module entity paired with whether it's a test module.
  */
-suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storageUpdates: MutableEntityStorage, project: Project): Pair<ModuleEntity, Boolean>? {
+suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storageUpdates: MutableEntityStorage, project: Project, onAspectBuildTriggered: (() -> Unit)? = null,): Pair<ModuleEntity, Boolean>? {
   val moduleId = ModuleId(this.formatAsModuleName(project))
 
   // First check if module exists in the mutable storage (from previous calls in this batch)
@@ -145,6 +145,7 @@ suspend fun Label.toModuleEntity(snapshot: ImmutableEntityStorage, storageUpdate
   // Determine module type based on target kind (TEST or JAVA_MODULE for non-test)
   // If target is not in cache, trigger a partial sync to fetch it via UnsyncedTargetUpdater
   if (cachedTarget == null) {
+    onAspectBuildTriggered?.invoke()
     val result = UnsyncedTargetUpdater.fetchAndCacheUnsyncedTarget(this, project, snapshot, storageUpdates) ?: return null
     cachedTarget = result.first
     dependencies.addAll(result.second)

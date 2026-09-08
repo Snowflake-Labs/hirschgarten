@@ -46,6 +46,7 @@ import org.jetbrains.bazel.sync.projectPreSyncHooks
 import org.jetbrains.bazel.sync.projectStructure.ProjectModelApplicatonTask
 import org.jetbrains.bazel.sync.projectSyncHooks
 import org.jetbrains.bazel.sync.scope.ProjectSyncScope
+import org.jetbrains.bazel.sync.status.publishFullSyncResult
 import org.jetbrains.bazel.sync.status.SyncAlreadyInProgressException
 import org.jetbrains.bazel.sync.status.SyncStatusService
 import org.jetbrains.bazel.sync.workspace.BazelWorkspaceResolveService
@@ -72,6 +73,9 @@ class ProjectSyncTask(private val project: Project) {
           return@useWithScope
         }
 
+        val syncStartNanos = System.nanoTime()
+        var syncResultLabel = "error"
+
         try {
           log.debug("Starting sync project task")
 
@@ -95,7 +99,7 @@ class ProjectSyncTask(private val project: Project) {
               redoAction = { sync(syncScope, buildProject) },
             )
 
-            when (val syncResult = syncJob.await()) {
+            when (val syncResult = syncJob.await().also { syncResultLabel = it.name.lowercase() }) {
               SyncResultStatus.FAILURE -> {
                 syncConsole.finishTask(
                   taskId,
@@ -129,6 +133,7 @@ class ProjectSyncTask(private val project: Project) {
           }
         }
         catch (e: CancellationException) {
+          syncResultLabel = "cancelled"
           syncConsole.finishTask(
             taskId,
             BazelPluginBundle.message("console.task.sync.cancelled"),
@@ -146,6 +151,7 @@ class ProjectSyncTask(private val project: Project) {
         }
         finally {
           SyncStatusService.getInstance(project).finishSync()
+          publishFullSyncResult(project, syncScope, buildProject, syncResultLabel, syncStartNanos)
           withContext(Dispatchers.EDT) {
             ProjectView.getInstance(project).refresh(ProjectViewUpdateCause.PLUGIN_BAZEL)
           }
