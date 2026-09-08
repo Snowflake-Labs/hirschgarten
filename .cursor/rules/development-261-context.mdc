@@ -1,0 +1,24 @@
+---
+description: Branch handoff context and fork-topology rules for the Snowflake hirschgarten fork
+alwaysApply: true
+---
+
+# hirschgarten (Snowflake fork)
+
+Read these two files at the repository root before proposing any change:
+
+1. **`AGENTS.md`** — canonical agent guidance for this repository. This rule defers to it; do not
+   duplicate guidance here.
+2. **`CONTEXT_DEVELOPMENT_261.md`** — the branch handoff document for `development-261`: current state,
+   recently merged PRs, open items, decisions already taken and reversed, and which source files are
+   upstream-maintained versus Snowflake-only.
+
+Each long-lived development branch carries its own `CONTEXT_DEVELOPMENT_<ijVersion>.md`. If the file
+named above is absent, look for `CONTEXT_DEVELOPMENT_*.md` at the repository root and read that.
+
+The single rule most often violated by an agent that skipped the above: **rebase cost is not uniform
+across this repository.** Some files are Snowflake-only and can be restructured freely; others are
+upstream-maintained and actively churned, so edits there must stay additive and small. Prefer a new
+Snowflake-owned file in the same package over appending declarations to an upstream file, and prefer
+wrapping a call site over re-indenting an upstream function body. See the "Fork Topology" section of
+the context document for the table and the commands to re-derive it.
