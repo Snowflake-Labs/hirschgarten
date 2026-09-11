@@ -194,7 +194,14 @@ class ProjectSyncTask(private val project: Project) {
     // Before a full sync there is no project structure to scan, so that work is discardable by
     // definition -- drop it and let the post-sync request be submitted as a new task.
     if (syncScope is FullProjectSync) {
+      val hadQueuedScanningTask = scannerExecutor.hasQueuedTasks
       withContext(Dispatchers.IO) { scannerExecutor.cancelAllTasksAndWait() }
+      // Logged because the failure this avoids is otherwise invisible: it produces no freeze
+      // dump (the EDT stays responsive, parked in SuvorovProgress) and no error, just a project
+      // that never leaves dumb mode.
+      if (hadQueuedScanningTask) {
+        log.info("Cancelled the scanning task queued before sync so the post-sync scan is submitted fresh")
+      }
     }
     scannerExecutor.suspendScanningAndIndexingThenExecute(syncActivityName) {
       saveAndSyncHandler.disableAutoSave().use {
