@@ -26,12 +26,6 @@ import org.jetbrains.bazel.server.sync.sharding.WildcardTargetExpander.ExpandedT
 import org.jetbrains.bazel.workspacecontext.WorkspaceContext
 import org.jetbrains.bsp.protocol.BazelTaskLogger
 import org.jetbrains.bsp.protocol.FeatureFlags
-import kotlin.math.min
-
-/**
- * Max number of individual targets per Bazel build shard.
- */
-private const val MAX_TARGET_SHARD_SIZE = 10000
 
 /**
  * number of packages per bazel query shard
@@ -105,8 +99,12 @@ internal object BazelBuildTargetSharder {
       ) ?: ShardingApproach.QUERY_AND_SHARD
     } ?: ShardingApproach.QUERY_AND_SHARD
 
-  /** Number of individual targets per blaze build shard.  */
-  private fun getTargetShardSize(context: WorkspaceContext): Int = min(context.targetShardSize, MAX_TARGET_SHARD_SIZE)
+  /**
+   * Number of individual targets per blaze build shard. The user's `target_shard_size` is honored as is:
+   * Bazel receives the targets through a target pattern file, so no command-line length limit applies,
+   * and an OOM during a shard build halves the shard size and retries.
+   */
+  private fun getTargetShardSize(context: WorkspaceContext): Int = context.targetShardSize
 
   /**
    *  Expand wildcard target patterns into individual bazel targets.
