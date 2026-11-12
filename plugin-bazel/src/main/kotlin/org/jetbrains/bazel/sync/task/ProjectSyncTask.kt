@@ -45,6 +45,7 @@ import org.jetbrains.bazel.sync.projectPostSyncHooks
 import org.jetbrains.bazel.sync.projectPreSyncHooks
 import org.jetbrains.bazel.sync.projectStructure.ProjectModelApplicatonTask
 import org.jetbrains.bazel.sync.projectSyncHooks
+import org.jetbrains.bazel.sync.scope.FullProjectSync
 import org.jetbrains.bazel.sync.scope.ProjectSyncScope
 import org.jetbrains.bazel.sync.status.publishFullSyncResult
 import org.jetbrains.bazel.sync.status.SyncAlreadyInProgressException
@@ -184,7 +185,25 @@ class ProjectSyncTask(private val project: Project) {
       )
     val saveAndSyncHandler = serviceAsync<SaveAndSyncHandler>()
     var syncResult = SyncResultStatus.FAILURE
-    UnindexedFilesScannerExecutor.getInstance(project).suspendScanningAndIndexingThenExecute(syncActivityName) {
+    val scannerExecutor = UnindexedFilesScannerExecutor.getInstance(project)
+    // A scan scheduled on project open is still held in the executor's `scanningTask` slot when sync
+    // starts, and suspending it does not clear the slot. The scanning request raised by our own model
+    // update is then merged into that stale task instead of being submitted fresh, so on resume it
+    // runs against a project structure that no longer exists and blocks in
+    // ChangedFilesCollector.ensureUpToDate behind the write action the scan itself schedules.
+    // Before a full sync there is no project structure to scan, so that work is discardable by
+    // definition -- drop it and let the post-sync request be submitted as a new task.
+    if (syncScope is FullProjectSync) {
+      val hadQueuedScanningTask = scannerExecutor.hasQueuedTasks
+      withContext(Dispatchers.IO) { scannerExecutor.cancelAllTasksAndWait() }
+      // Logged because the failure this avoids is otherwise invisible: it produces no freeze
+      // dump (the EDT stays responsive, parked in SuvorovProgress) and no error, just a project
+      // that never leaves dumb mode.
+      if (hadQueuedScanningTask) {
+        log.info("Cancelled the scanning task queued before sync so the post-sync scan is submitted fresh")
+      }
+    }
+    scannerExecutor.suspendScanningAndIndexingThenExecute(syncActivityName) {
       saveAndSyncHandler.disableAutoSave().use {
         withBackgroundProgress(project, BazelPluginBundle.message("background.progress.syncing.project"), true) {
           reportSequentialProgress { progressReporter ->
