@@ -102,6 +102,19 @@ Note for anyone aggregating this data: `PartialSyncResult` is published per *bat
 action — `processEventQueue` runs in a `do/while` over `FileEventQueueController` batches with a fresh
 holder each time, and events from separate `processEventsForProject` calls can share a batch.
 
+**PR #42 — honor `target_shard_size` in shard sync** (open)
+
+Port of `Snowflake-Labs/intellij@7cb3ab4329`. `BazelBuildTargetSharder.getTargetShardSize` returned
+`min(target_shard_size, 10000)`, so an explicit `target_shard_size` above 10000 was silently capped.
+It now returns the user's value. Nothing needs the cap: `BazelCommand.Build` always passes targets
+through `--target_pattern_file`, and an OOM during a shard build already halves the shard and retries
+in `ProjectResolver.buildProjectWithAspect`. Default stays `1000`. No unit test, because the
+`pluginTests` Bazel target is disabled on this branch; verified by `bazel build //:bazel-plugin`.
+
+On rebase: upstream still has `MAX_TARGET_SHARD_SIZE` and uses it in newer package-splitting code
+(`batchPackagesOfOneRepository`). Keep upstream's constant for that, and keep this change in
+`getTargetShardSize`.
+
 ### Decisions / Closed Without Merging
 
 **PR #38 — libraries reachable only through exported deps** (closed 2026-09-03, not merged).
@@ -145,6 +158,7 @@ Verified as of `jetbrains/main` @ `1e418e3c76` (2026-08-20):
 |---|---|---|
 | `BazelFileEventListener.kt` | `intellij.bazel.core/src/…` | 12 commits — hottest file we edit |
 | `ProjectSyncTask.kt` | `intellij.bazel.backend/src/…` | 1 commit |
+| `BazelBuildTargetSharder.kt` | `intellij.bazel.backend/src/…` (here `intellij.bazel.connector/src/…`) | 10 commits (checked 2026-11-12) |
 | `SimplifiedFileEvent.kt`, `SyncStatusService.kt` | exist upstream | — |
 | `AddFileToModuleAction.kt`, `ModuleAssignmentUtils.kt`, `UnsyncedTargetUpdater.kt` | **Snowflake-only** | edit freely |
 
