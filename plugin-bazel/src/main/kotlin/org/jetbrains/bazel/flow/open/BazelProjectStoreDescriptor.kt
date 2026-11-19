@@ -144,4 +144,9 @@ private val shareableConfigFiles =
     "fileTemplates",
     "inspectionProfiles",
     "scopes",
+    // Snowflake: component storages nested in the scheme dirs above. Custom macros match the exact
+    // file spec, so these are not covered by their parent dir and would otherwise be read from the
+    // IDE cache, e.g. losing the project's selected inspection profile.
+    "copyright/profiles_settings.xml",
+    "inspectionProfiles/profiles_settings.xml",
   )
